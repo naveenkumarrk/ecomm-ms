@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>PayPal Checkout Integration</title>
+<style>
+body { 
+  max-width: 700px; 
+  margin: 40px auto; 
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+  padding: 20px;
+  background: #f8f9fa;
+}
+.card {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
+  padding: 30px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+h2 { 
+  margin-top: 0; 
+  color: #333;
+  font-size: 24px;
+}
+h3 {
+  color: #555;
+  font-size: 18px;
+  margin-top: 0;
+}
+.info-box {
+  background: #e8f4f8;
+  border-left: 4px solid #0070ba;
+  padding: 16px;
+  margin: 20px 0;
+  border-radius: 4px;
+}
+.info-box h4 {
+  margin: 0 0 8px 0;
+  color: #0070ba;
+}
+#paypal-button-container {
+  margin: 24px 0;
+  min-height: 150px;
+}
+.status {
+  padding: 12px 16px;
+  border-radius: 6px;
+  margin: 16px 0;
+  font-weight: 500;
+}
+.status.success { 
+  background: #d4edda; 
+  color: #155724; 
+  border: 1px solid #c3e6cb; 
+}
+.status.error { 
+  background: #f8d7da; 
+  color: #721c24; 
+  border: 1px solid #f5c6cb; 
+}
+.status.info { 
+  background: #d1ecf1; 
+  color: #0c5460; 
+  border: 1px solid #bee5eb; 
+}
+.status.loading {
+  background: #fff3cd;
+  color: #856404;
+  border: 1px solid #ffc107;
+}
+pre { 
+  background: #f5f5f5; 
+  padding: 16px; 
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 13px;
+  border: 1px solid #ddd;
+}
+.hidden {
+  display: none;
+}
+.order-summary {
+  background: #f8f9fa;
+  padding: 20px;
+  border-radius: 8px;
+  margin: 20px 0;
+}
+.order-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid #dee2e6;
+}
+.order-total {
+  display: flex;
+  justify-content: space-between;
+  padding: 15px 0;
+  font-weight: bold;
+  font-size: 18px;
+  color: #333;
+}
+.config-section {
+  background: #fffbf0;
+  padding: 16px;
+  border-radius: 6px;
+  margin-bottom: 20px;
+  border: 1px solid #ffeaa7;
+}
+.config-item {
+  margin: 10px 0;
+}
+.config-item label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: #666;
+  margin-bottom: 4px;
+}
+.config-item input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  font-family: 'Monaco', 'Courier New', monospace;
+}
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h2>🛒 PayPal Checkout Demo</h2>
+  
+  <div class="info-box">
+    <h4>🔧 Server-Side Integration</h4>
+    <p style="margin: 8px 0 0 0; line-height: 1.6;">
+      Your server creates the order and processes the capture. 
+      PayPal handles the payment UI popup where customers enter their payment details.
+    </p>
+  </div>
+
+  <!-- Configuration Section (for testing) -->
+  <div class="config-section">
+    <h4 style="margin-top: 0; color: #d63031;">⚙️ Configuration</h4>
+    <div class="config-item">
+      <label>Worker URL</label>
+      <input id="workerUrl" type="text" value="http://localhost:8787">
+    </div>
+    <div class="config-item">
+      <label>PayPal Client ID (for SDK)</label>
+      <input id="paypalClientId" type="text" placeholder="Your PayPal Sandbox Client ID">
+    </div>
+  </div>
+
+  <!-- Order Summary -->
+  <div class="order-summary">
+    <h3 style="margin-top: 0;">Order Summary</h3>
+    <div class="order-item">
+      <span>Premium Plan Subscription</span>
+      <span>$45.00</span>
+    </div>
+    <div class="order-item">
+      <span>Processing Fee</span>
+      <span>$4.00</span>
+    </div>
+    <div class="order-total">
+      <span>Total</span>
+      <span>$49.00</span>
+    </div>
+  </div>
+
+  <!-- Status Messages -->
+  <div id="status"></div>
+
+  <!-- PayPal Button Container -->
+  <div id="paypal-button-container"></div>
+
+  <!-- Transaction Details -->
+  <div id="result" class="hidden"></div>
+</div>
+
+<div class="card">
+  <h3>📖 How It Works</h3>
+  <ol style="line-height: 1.8;">
+    <li><strong>Click PayPal Button</strong> → Calls your server to create order</li>
+    <li><strong>PayPal Popup Opens</strong> → Customer enters payment details</li>
+    <li><strong>Customer Approves</strong> → PayPal processes payment</li>
+    <li><strong>Server Captures</strong> → Your server finalizes the transaction</li>
+    <li><strong>Success!</strong> → Order is created and inventory updated</li>
+  </ol>
+  
+  <div class="info-box">
+    <h4>🧪 Testing in Sandbox</h4>
+    <ul style="margin: 8px 0; padding-left: 20px; line-height: 1.6;">
+      <li>Add your PayPal Sandbox Client ID above</li>
+      <li>Click the PayPal button</li>
+      <li>Login with sandbox test account</li>
+      <li>Use test card: 4111 1111 1111 1111</li>
+    </ul>
+  </div>
+</div>
+
+<!-- Load PayPal SDK dynamically -->
+<script>
+// Configuration
+const ORDER_CONFIG = {
+  reservationId: `res_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+  amount: 49.00,
+  currency: 'USD',
+  description: 'Premium Plan Subscription'
+};
+
+// Show status message
+function showStatus(message, type = 'info') {
+  const statusDiv = document.getElementById('status');
+  statusDiv.innerHTML = `<div class="status ${type}">${message}</div>`;
+  statusDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// Show result
+function showResult(data, show = true) {
+  const resultDiv = document.getElementById('result');
+  if (show) {
+    resultDiv.innerHTML = `
+      <h3>Transaction Details</h3>
+      <pre>${JSON.stringify(data, null, 2)}</pre>
+    `;
+    resultDiv.classList.remove('hidden');
+    resultDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } else {
+    resultDiv.classList.add('hidden');
+  }
+}
+
+// Load PayPal SDK
+function loadPayPalSDK(clientId) {
+  return new Promise((resolve, reject) => {
+    if (window.paypal) {
+      resolve(window.paypal);
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = `https://www.paypal.com/sdk/js?client-id=${clientId}&currency=USD`;
+    script.onload = () => resolve(window.paypal);
+    script.onerror = () => reject(new Error('PayPal SDK failed to load'));
+    document.head.appendChild(script);
+  });
+}
+
+// Initialize PayPal when client ID is provided
+document.getElementById('paypalClientId').addEventListener('input', async (e) => {
+  const clientId = e.target.value.trim();
+  if (clientId.length > 20) { // Basic validation
+    try {
+      showStatus('Loading PayPal SDK...', 'loading');
+      await loadPayPalSDK(clientId);
+      await initializePayPal();
+      showStatus('✅ PayPal SDK loaded! Click button below to pay', 'success');
+    } catch (err) {
+      showStatus(`❌ Failed to load PayPal SDK: ${err.message}`, 'error');
+    }
+  }
+});
+
+// Initialize PayPal Buttons
+async function initializePayPal() {
+  const container = document.getElementById('paypal-button-container');
+  container.innerHTML = ''; // Clear previous buttons
+
+  if (!window.paypal) {
+    showStatus('⚠️ Please enter your PayPal Client ID above', 'error');
+    return;
+  }
+
+  const workerUrl = document.getElementById('workerUrl').value.replace(/\/$/, '');
+
+  paypal.Buttons({
+    // Style customization
+    style: {
+      layout: 'vertical',
+      color: 'blue',
+      shape: 'rect',
+      label: 'pay',
+      height: 45
+    },
+
+    // Step 1: Create order on YOUR server
+    createOrder: async function(data, actions) {
+      showStatus('🔄 Creating order on server...', 'loading');
+      
+      try {
+        const response = await fetch(`${workerUrl}/payment/paypal/create`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            reservationId: ORDER_CONFIG.reservationId,
+            amount: ORDER_CONFIG.amount,
+            currency: ORDER_CONFIG.currency,
+            returnUrl: window.location.href
+          })
+        });
+
+        const orderData = await response.json();
+        
+        if (!response.ok || orderData.error) {
+          throw new Error(orderData.error || 'Failed to create order');
+        }
+
+        showStatus('✅ Order created! Opening PayPal...', 'success');
+        showResult(orderData, true);
+        
+        // Return the PayPal order ID
+        return orderData.paypalOrderId;
+        
+      } catch (err) {
+        showStatus(`❌ Error creating order: ${err.message}`, 'error');
+        throw err;
+      }
+    },
+
+    // Step 2: Customer approves payment (handled by PayPal in popup)
+    // Step 3: Capture payment on YOUR server
+    onApprove: async function(data, actions) {
+      showStatus('💳 Payment approved! Capturing funds...', 'loading');
+      
+      try {
+        const response = await fetch(`${workerUrl}/payment/paypal/capture`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            paypalOrderId: data.orderID,
+            reservationId: ORDER_CONFIG.reservationId
+          })
+        });
+
+        const captureData = await response.json();
+        
+        if (!response.ok || captureData.error) {
+          throw new Error(captureData.error || 'Failed to capture payment');
+        }
+
+        // Success!
+        showStatus(`🎉 Payment successful! Order ID: ${captureData.orderId}`, 'success');
+        showResult(captureData, true);
+        
+        // Redirect to success page (optional)
+        setTimeout(() => {
+          // window.location.href = '/order-confirmation?orderId=' + captureData.orderId;
+        }, 3000);
+        
+      } catch (err) {
+        showStatus(`❌ Error capturing payment: ${err.message}`, 'error');
+        console.error('Capture error:', err);
+      }
+    },
+
+    // Handle cancellation
+    onCancel: function(data) {
+      showStatus('⚠️ Payment cancelled by customer', 'info');
+      showResult({ cancelled: true, orderID: data.orderID }, true);
+    },
+
+    // Handle errors
+    onError: function(err) {
+      showStatus(`❌ PayPal error: ${err.message || 'Something went wrong'}`, 'error');
+      console.error('PayPal error:', err);
+    }
+
+  }).render('#paypal-button-container');
+}
+
+// Show initial instructions
+showStatus('👆 Enter your PayPal Sandbox Client ID above to get started', 'info');
+</script>
+
+</body>
+</html>

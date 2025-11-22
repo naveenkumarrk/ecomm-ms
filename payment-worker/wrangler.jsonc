@@ -1,0 +1,64 @@
+/**
+ * For more details on how to configure Wrangler, refer to:
+ * https://developers.cloudflare.com/workers/wrangler/configuration/
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "payment-worker",
+	"main": "src/index.js",
+	"compatibility_date": "2025-11-18",
+	"observability": {
+		"enabled": true
+	},
+	"vars": {
+		"PAYPAL_CLIENT_ID": "AWJNnIb7P1sow6PHPc9iEB2oY6p7eesit5V46vK4ijFzXpvWeBGZ8yeUNvCxNK0cBfvyujEACfhQE9ne",
+		"PAYPAL_SECRET": "EPP9upKnhQrPj9NQW-1fsQmwfBcQslwy7UyX1O0cIhco33jChP1o04-NaLjP49NRg0LBgw_GP-M70geY",
+		"PAYPAL_API": " https://api-m.sandbox.paypal.com",
+		"INVENTORY_SERVICE_URL": "https://inventory-worker.111naveenkumarrk.workers.dev",
+		"ORDER_SERVICE_URL": "https://order-worker.111naveenkumarrk.workers.dev",
+		"INTERNAL_SECRET": "internalsecret",
+		"BASE_RETURN_URL":"http://localhost:8187",
+		"BASE_CANCEL_URL" : "http://localhost:8187"
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "payment-db",
+			"database_id": "44ba601e-bb56-4c0d-bce4-c38beb9d40aa"
+		}
+	],
+	"kv_namespaces": [{
+                    "binding": "PAYMENT_KV",
+                    "id": "34b9ad30d53e4945b19f41c33d23f1d9"
+                 }]
+	/**
+	 * Smart Placement
+	 * Docs: https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
+	 */
+	// "placement": { "mode": "smart" }
+	/**
+	 * Bindings
+	 * Bindings allow your Worker to interact with resources on the Cloudflare Developer Platform, including
+	 * databases, object storage, AI inference, real-time communication and more.
+	 * https://developers.cloudflare.com/workers/runtime-apis/bindings/
+	 */
+	/**
+	 * Environment Variables
+	 * https://developers.cloudflare.com/workers/wrangler/configuration/#environment-variables
+	 */
+	// "vars": { "MY_VARIABLE": "production_value" }
+	/**
+	 * Note: Use secrets to store sensitive data.
+	 * https://developers.cloudflare.com/workers/configuration/secrets/
+	 */
+	/**
+	 * Static Assets
+	 * https://developers.cloudflare.com/workers/static-assets/binding/
+	 */
+	// "assets": { "directory": "./public/", "binding": "ASSETS" }
+	/**
+	 * Service Bindings (communicate between multiple Workers)
+	 * https://developers.cloudflare.com/workers/wrangler/configuration/#service-bindings
+	 */
+	// "services": [{ "binding": "MY_SERVICE", "service": "my-service" }]
+}

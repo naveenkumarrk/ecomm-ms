@@ -1,0 +1,31 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cart-worker",
+  "main": "src/index.js",
+  "compatibility_date": "2025-11-18",
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "PRODUCTS_SERVICE_URL": "https://product-worker.111naveenkumarrk.workers.dev",
+    "INVENTORY_SERVICE_URL": "https://inventory-worker.111naveenkumarrk.workers.dev",
+    "FULFILLMENT_SERVICE_URL": "https://fulfillment-worker.111naveenkumarrk.workers.dev",
+    "PAYMENT_SERVICE_URL": "https://payment-worker.111naveenkumarrk.workers.dev",
+    "INTERNAL_SECRET": "internalsecret",
+    "DEFAULT_CURRENCY": "INR"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CART_DO",
+        "class_name": "CartDurableObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["CartDurableObject"]
+    }
+  ]
+}

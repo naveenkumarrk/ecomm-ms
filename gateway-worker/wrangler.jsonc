@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "gateway-worker",
+  "main": "src/index.js",
+  "type": "module",
+  "compatibility_date": "2025-11-19",
+  "observability": { "enabled": true },
+  "vars": {
+    "PRODUCTS_SERVICE_URL": "https://product-worker.111naveenkumarrk.workers.dev",
+    "INVENTORY_SERVICE_URL": "https://inventory-worker.111naveenkumarrk.workers.dev",
+    "FULFILLMENT_SERVICE_URL": "https://fulfillment-worker.111naveenkumarrk.workers.dev",
+    "PAYMENT_SERVICE_URL": "https://payment-worker.111naveenkumarrk.workers.dev",
+    "CART_SERVICE_URL": "https://cart-worker.111naveenkumarrk.workers.dev",
+    "ORDER_SERVICE_URL": "https://order-worker.111naveenkumarrk.workers.dev",
+    "INTERNAL_SECRET": "internalsecret"
+  }
+}
