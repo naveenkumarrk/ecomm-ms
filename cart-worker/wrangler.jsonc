@@ -12,8 +12,14 @@
     "FULFILLMENT_SERVICE_URL": "https://fulfillment-worker.111naveenkumarrk.workers.dev",
     "PAYMENT_SERVICE_URL": "https://payment-worker.111naveenkumarrk.workers.dev",
     "INTERNAL_SECRET": "internalsecret",
-    "DEFAULT_CURRENCY": "INR"
+    "DEFAULT_CURRENCY": "USD"
   },
+  "kv_namespaces": [
+    {
+      "binding": "DISCOUNT_KV",
+      "id": "23cbefa0cc0947368b52269d3e6e9a1d"
+    }
+  ],
   "durable_objects": {
     "bindings": [
       {

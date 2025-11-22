@@ -1,8 +1,9 @@
-// cart-do.js (Durable Object + proxy) - UPDATED to hide cartId in headers
+// cart-do.js (FINAL FIXED VERSION)
+
 import { Router } from "itty-router";
 
 /* ============================================================
-   SHARED HMAC SIGNING (single secret)
+   SHARED HELPERS
 ============================================================ */
 async function hmac(secret, message) {
   const enc = new TextEncoder();
@@ -23,23 +24,18 @@ function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-timestamp, x-signature, x-cart-id",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-timestamp, x-signature, x-cart-id"
   };
 }
 
-async function handleOptions(request) {
-  return new Response(null, {
-    status: 204,
-    headers: corsHeaders()
-  });
+async function handleOptions() {
+  return new Response(null, { status: 204, headers: corsHeaders() });
 }
 
 async function fetchWithInternalAuth(baseUrl, path, method, body, secret) {
   const url = baseUrl.replace(/\/$/, "") + path;
-
   const ts = Date.now().toString();
   const bodyText = body ? JSON.stringify(body) : "";
-
   const msg = `${ts}|${method}|${path}|${bodyText}`;
   const signature = await hmac(secret, msg);
 
@@ -57,7 +53,11 @@ async function fetchWithInternalAuth(baseUrl, path, method, body, secret) {
 
   const txt = await res.text();
   try {
-    return { ok: res.ok, status: res.status, body: txt ? JSON.parse(txt) : null };
+    return {
+      ok: res.ok,
+      status: res.status,
+      body: txt ? JSON.parse(txt) : null
+    };
   } catch {
     return { ok: res.ok, status: res.status, body: txt };
   }
@@ -67,7 +67,6 @@ const nowSec = () => Math.floor(Date.now() / 1000);
 
 /* ============================================================
    CART DURABLE OBJECT
-   (unchanged: your DO implementation kept as-is)
 ============================================================ */
 export class CartDurableObject {
   constructor(state, env) {
@@ -78,92 +77,126 @@ export class CartDurableObject {
     this.initRouter();
   }
 
+  /* --------------------------
+     Load & Persist
+  --------------------------- */
   async loadState() {
     if (this._loaded) return;
 
     const existing = await this.state.storage.get("cart");
 
-    this.cart = existing || {
-      cartId: `cart_${crypto.randomUUID()}`,
-      items: [],
-      address: null,
-      shippingOptions: null,
-      shippingMethod: null,
-      reservationId: null,
-      paymentOrderId: null,
-      summary: { subtotal: 0, shipping: 0, total: 0 },
-      createdAt: nowSec(),
-      updatedAt: nowSec(),
-    };
+    this.cart =
+      existing || {
+        cartId: `cart_${crypto.randomUUID()}`,
+        items: [],
+        address: null,
+        shippingOptions: null,
+        shippingMethod: null,
+        reservationId: null,
+        paymentOrderId: null,
+
+        coupon: null,
+        discount: 0,
+        discountType: null,
+
+        summary: { subtotal: 0, discount: 0, shipping: 0, total: 0 },
+
+        createdAt: nowSec(),
+        updatedAt: nowSec()
+      };
 
     this._loaded = true;
   }
 
   async persist() {
     this.cart.updatedAt = nowSec();
-    await this.state.storage.put("cart", this.cart);
+    await this.state.storage.put("cart", this.cart, { expirationTtl: 86400 }); // 24 hrs TTL
   }
 
+  /* --------------------------
+     Summary Computation
+  --------------------------- */
   recompute() {
-    const subtotal = this.cart.items.reduce((s, i) => s + i.unitPrice * i.qty, 0);
+    const subtotal = this.cart.items.reduce(
+      (s, i) => s + i.unitPrice * i.qty,
+      0
+    );
+
+    let discount = this.cart.discount || 0;
+    discount = Math.min(discount, subtotal);
+
     const shipping = this.cart.shippingMethod?.cost || 0;
-    this.cart.summary = { subtotal, shipping, total: subtotal + shipping };
+
+    this.cart.summary = {
+      subtotal,
+      discount,
+      shipping,
+      total: Math.max(0, subtotal - discount + shipping)
+    };
   }
 
+  /* ============================================================
+     ROUTES
+  ============================================================= */
   initRouter() {
     const r = this.router;
 
-    /* ------------------------- init cart ------------------------- */
-    r.post("/cart/init", async () => {
+    /* INIT */
+    r.post("/cart/init", async (req) => {
       await this.loadState();
+
+      // Critical: Sync ID
+      const headerId = req.headers.get("x-cart-id");
+      if (headerId) this.cart.cartId = headerId;
+
+      await this.persist();
       return this.json({ cartId: this.cart.cartId });
     });
 
-    /* ------------------------- summary --------------------------- */
+    /* SUMMARY */
     r.get("/cart/summary", async () => {
       await this.loadState();
       this.recompute();
       return this.json(this.cart);
     });
 
-    /* ------------------------- add item -------------------------- */
-    r.post("/cart/add", async (req) => {
+    /* ADD ITEM */
+    r.post("/cart/add", async req => {
       await this.loadState();
-      const payload = await req.json().catch(() => ({}));
+      const payload = await req.json();
       const { productId, variantId, quantity = 1 } = payload;
 
       if (!productId) return this.error("productId_required");
 
-      // get product details
-      const pRes = await fetch(
-        `${this.env.PRODUCTS_SERVICE_URL}/products/${productId}`
-      );
+      const pRes = await fetch(`${this.env.PRODUCTS_SERVICE_URL}/products/${productId}`);
       if (!pRes.ok) return this.error("product_lookup_failed");
 
       const prod = await pRes.json();
-      
-      // Find the variant or use the first one
-      const variant = prod.variants?.find(v => v.variantId === variantId) || prod.variants?.[0];
+
+      const variant =
+        prod.variants?.find(v => v.variantId === variantId) ||
+        prod.variants?.[0];
+
       if (!variant) return this.error("variant_not_found");
-      
+
       const price = Number(variant.price || prod.metadata?.price || 0);
 
-      const i = this.cart.items.findIndex((x) => 
-        x.productId === productId && x.variantId === (variantId || variant.variantId)
+      const i = this.cart.items.findIndex(
+        x =>
+          x.productId === productId &&
+          x.variantId === (variantId || variant.variantId)
       );
-      
-      if (i >= 0) {
-        this.cart.items[i].qty += Number(quantity);
-      } else {
+
+      if (i >= 0) this.cart.items[i].qty += Number(quantity);
+      else
         this.cart.items.push({
           productId,
           variantId: variantId || variant.variantId,
           qty: Number(quantity),
           unitPrice: price,
           title: prod.title,
-          attributes: variant.attributes || {},
+          attributes: variant.attributes || {}
         });
-      }
 
       this.cart.reservationId = null;
       this.cart.paymentOrderId = null;
@@ -174,24 +207,24 @@ export class CartDurableObject {
       return this.json({ cart: this.cart });
     });
 
-    /* ------------------------- update item -------------------------- */
-    r.post("/cart/update", async (req) => {
+    /* UPDATE ITEM */
+    r.post("/cart/update", async req => {
       await this.loadState();
       const { productId, variantId, quantity } = await req.json();
 
-      if (!productId || quantity === undefined) return this.error("productId_and_quantity_required");
+      if (!productId || quantity == null)
+        return this.error("productId_and_quantity_required");
 
-      const i = this.cart.items.findIndex((x) => 
-        x.productId === productId && x.variantId === variantId
+      const i = this.cart.items.findIndex(
+        x =>
+          x.productId === productId &&
+          x.variantId === variantId
       );
 
       if (i < 0) return this.error("item_not_found");
 
-      if (quantity <= 0) {
-        this.cart.items.splice(i, 1);
-      } else {
-        this.cart.items[i].qty = Number(quantity);
-      }
+      if (quantity <= 0) this.cart.items.splice(i, 1);
+      else this.cart.items[i].qty = Number(quantity);
 
       this.cart.reservationId = null;
       this.cart.paymentOrderId = null;
@@ -202,15 +235,17 @@ export class CartDurableObject {
       return this.json({ cart: this.cart });
     });
 
-    /* ------------------------- remove item -------------------------- */
-    r.post("/cart/remove", async (req) => {
+    /* REMOVE ITEM */
+    r.post("/cart/remove", async req => {
       await this.loadState();
       const { productId, variantId } = await req.json();
 
       if (!productId) return this.error("productId_required");
 
-      const i = this.cart.items.findIndex((x) => 
-        x.productId === productId && (!variantId || x.variantId === variantId)
+      const i = this.cart.items.findIndex(
+        x =>
+          x.productId === productId &&
+          (!variantId || x.variantId === variantId)
       );
 
       if (i < 0) return this.error("item_not_found");
@@ -226,21 +261,40 @@ export class CartDurableObject {
       return this.json({ cart: this.cart });
     });
 
-    /* ------------------------- clear cart -------------------------- */
+    /* CLEAR CART (FIXED — full safe reset) */
     r.post("/cart/clear", async (req) => {
       await this.loadState();
-      this.cart.items = [];
-      this.cart.reservationId = null;
-      this.cart.paymentOrderId = null;
-      this.recompute();
+
+      const id = this.cart.cartId;
+
+      this.cart = {
+        cartId: id,
+        items: [],
+        address: null,
+        shippingOptions: null,
+        shippingMethod: null,
+        reservationId: null,
+        paymentOrderId: null,
+
+        coupon: null,
+        discount: 0,
+        discountType: null,
+
+        summary: { subtotal: 0, discount: 0, shipping: 0, total: 0 },
+
+        createdAt: nowSec(),
+        updatedAt: nowSec()
+      };
+
       await this.persist();
       return this.json({ cart: this.cart });
     });
 
-    /* ------------------------- address --------------------------- */
-    r.post("/cart/address", async (req) => {
+    /* ADDRESS */
+    r.post("/cart/address", async req => {
       await this.loadState();
       const { address } = await req.json();
+
       if (!address) return this.error("address_required");
 
       this.cart.address = address;
@@ -251,19 +305,17 @@ export class CartDurableObject {
       return this.json({ cart: this.cart });
     });
 
-    /* ------------------------- shipping options ------------------ */
+    /* SHIPPING OPTIONS */
     r.get("/cart/shipping-options", async () => {
       await this.loadState();
-      if (!this.cart.address) return this.error("address_required");
 
-      // already cached
-      if (this.cart.shippingOptions)
-        return this.json({ shippingOptions: this.cart.shippingOptions });
+      if (!this.cart.address) return this.error("address_required");
 
       const payload = {
         items: this.cart.items,
         address: this.cart.address,
         subtotal: this.cart.summary.subtotal,
+        couponCode: this.cart.coupon
       };
 
       const res = await fetchWithInternalAuth(
@@ -282,22 +334,76 @@ export class CartDurableObject {
       return this.json({ shippingOptions: this.cart.shippingOptions });
     });
 
-    /* ------------------------- select shipping ------------------- */
-    r.post("/cart/shipping", async (req) => {
+    /* SELECT SHIPPING */
+    r.post("/cart/shipping", async req => {
       await this.loadState();
       const { methodId } = await req.json();
-      const option = this.cart.shippingOptions?.find((o) => o.methodId === methodId);
 
+      const option = this.cart.shippingOptions?.find(o => o.methodId === methodId);
       if (!option) return this.error("invalid_shipping_method");
 
       this.cart.shippingMethod = option;
+      this.recompute();
+
+      await this.persist();
+      return this.json({ cart: this.cart });
+    });
+
+    /* COUPON APPLY */
+    r.post("/cart/coupon/apply", async req => {
+      await this.loadState();
+      const { code } = await req.json();
+      if (!code) return this.error("coupon_required");
+
+      const raw = await this.env.DISCOUNT_KV.get(`discount:${code}`);
+      if (!raw) return this.error("invalid_coupon");
+
+      const coupon = JSON.parse(raw);
+      const now = Date.now() / 1000;
+
+      if (coupon.expiresAt && coupon.expiresAt < now)
+        return this.error("coupon_expired");
+
+      const subtotal = this.cart.items.reduce(
+        (s, i) => s + i.unitPrice * i.qty,
+        0
+      );
+
+      if (coupon.minCart && subtotal < coupon.minCart)
+        return this.error("min_cart_not_met", { min: coupon.minCart });
+
+      this.cart.coupon = code;
+      this.cart.discountType = coupon.type;
+
+      if (coupon.type === "percent") {
+        this.cart.discount = Math.round(subtotal * (coupon.value / 100));
+      } else if (coupon.type === "flat") {
+        this.cart.discount = Math.min(subtotal, coupon.value);
+      } else if (coupon.type === "free_shipping") {
+        this.cart.discount = 0;
+      }
+
       this.recompute();
       await this.persist();
 
       return this.json({ cart: this.cart });
     });
 
-    /* ------------------------- checkout start (reserve + pay) ---- */
+    /* REMOVE COUPON */
+    r.post("/cart/coupon/remove", async () => {
+      await this.loadState();
+
+      this.cart.coupon = null;
+      this.cart.discount = 0;
+      this.cart.discountType = null;
+
+      this.recompute();
+      await this.persist();
+
+      return this.json({ cart: this.cart });
+    });
+
+    /* CHECKOUT START */
     r.post("/checkout/start", async () => {
       await this.loadState();
 
@@ -307,7 +413,7 @@ export class CartDurableObject {
 
       const reservationId = `res_${crypto.randomUUID()}`;
 
-      // TRY INVENTORY RESERVE
+      // Reserve inventory
       const invRes = await fetchWithInternalAuth(
         this.env.INVENTORY_SERVICE_URL,
         "/inventory/reserve",
@@ -316,33 +422,33 @@ export class CartDurableObject {
           reservationId,
           items: this.cart.items,
           cartId: this.cart.cartId,
-          ttl: 900,
+          ttl: 900
         },
         this.env.INTERNAL_SECRET
       );
-      console.log("INVENTORY RESERVE RAW RESPONSE:", invRes);
 
-      if (!invRes.ok) {
-        return this.error("reservation_failed", invRes.body, invRes.status);
-      }
+      if (!invRes.ok) return this.error("reservation_failed", invRes.body, invRes.status);
 
       this.cart.reservationId = reservationId;
 
-      // create mock payment
+      // Create payment order
       const payRes = await fetchWithInternalAuth(
         this.env.PAYMENT_SERVICE_URL,
-        "/payment/mock/create",
+        "/payment/paypal/create",
         "POST",
         {
           reservationId,
           amount: this.cart.summary.total,
-          currency: this.env.DEFAULT_CURRENCY || "INR",
+          currency: this.env.DEFAULT_CURRENCY || "USD",
           metadata: {
             cartId: this.cart.cartId,
+            coupon: this.cart.coupon,
+            discount: this.cart.discount,
+            discountType: this.cart.discountType,
             address: this.cart.address,
             shippingMethod: this.cart.shippingMethod,
-            items: this.cart.items,
-          },
+            items: this.cart.items
+          }
         },
         this.env.INTERNAL_SECRET
       );
@@ -355,12 +461,13 @@ export class CartDurableObject {
           { reservationId },
           this.env.INTERNAL_SECRET
         );
+
         return this.error("payment_error", payRes.body);
       }
 
       const paymentId = payRes.body.paymentId;
-
       this.cart.paymentOrderId = paymentId;
+
       await this.persist();
 
       return this.json({
@@ -368,22 +475,18 @@ export class CartDurableObject {
         paypalOrderId: paymentId,
         paymentId,
         summary: this.cart.summary,
-        approveUrl: payRes.body.approveUrl,
+        approveUrl: payRes.body.approveUrl
       });
     });
 
-    /* fallback */
     r.all("*", () => new Response("Not found", { status: 404, headers: corsHeaders() }));
   }
 
-  /* helpers */
+  /* Helpers */
   json(body, status = 200) {
     return new Response(JSON.stringify(body), {
       status,
-      headers: { 
-        "Content-Type": "application/json",
-        ...corsHeaders()
-      }
+      headers: { "Content-Type": "application/json", ...corsHeaders() }
     });
   }
 
@@ -393,68 +496,51 @@ export class CartDurableObject {
 
   async fetch(req) {
     await this.loadState();
-    // allow internal header override x-cart-id to map DO instance
-    // the top-level proxy ensures x-cart-id is provided
     return this.router.fetch(req);
   }
 }
 
 /* ============================================================
-   TOP-LEVEL PROXY (updated to use header-based cartId routing)
+   TOP LEVEL PROXY
 ============================================================ */
 const topRouter = Router();
 topRouter.options("*", handleOptions);
+
 topRouter.get("/health", () =>
   new Response(JSON.stringify({ ok: true, service: "cart-do" }), {
-    headers: { 
-      "Content-Type": "application/json",
-      ...corsHeaders()
-    }
+    headers: { "Content-Type": "application/json", ...corsHeaders() }
   })
 );
 
-// NEW: route to DO based on x-cart-id header (hidden)
 topRouter.all("*", async (req, env) => {
   try {
-    // read cartId from header (proxy & client must set x-cart-id)
-    // If missing, generate a new cartId here (hidden from URL)
     let cartId = req.headers.get("x-cart-id");
-    if (!cartId) {
-      cartId = `cart_${crypto.randomUUID()}`;
-    }
+    if (!cartId) cartId = `cart_${crypto.randomUUID()}`;
 
-    // Determine DO id from name (use the cartId as the name)
     const id = env.CART_DO.idFromName(cartId);
     const stub = env.CART_DO.get(id);
 
-    // Forward the request to the DO, but ensure the header x-cart-id is present
-    // Build new headers object merging existing headers and x-cart-id
     const newHeaders = new Headers(req.headers);
     newHeaders.set("x-cart-id", cartId);
 
-    // Build forwarded Request - keep original method/url/body
     const forwarded = new Request(req.url, {
       method: req.method,
       headers: newHeaders,
       body: req.body,
-      redirect: req.redirect,
+      redirect: req.redirect
     });
 
     const res = await stub.fetch(forwarded);
 
-    // Clone response and attach x-cart-id to response headers (so client receives it once)
     const outHeaders = new Headers(res.headers);
     outHeaders.set("x-cart-id", cartId);
-    // Ensure CORS headers present
     Object.entries(corsHeaders()).forEach(([k, v]) => outHeaders.set(k, v));
 
     const body = await res.arrayBuffer();
-    return new Response(body, {
-      status: res.status,
-      headers: outHeaders
-    });
+
+    return new Response(body, { status: res.status, headers: outHeaders });
   } catch (e) {
-    console.error("Top router proxy error:", e);
+    console.error("Top router error:", e);
     return new Response(JSON.stringify({ error: "proxy_error", details: String(e) }), {
       status: 500,
       headers: { "Content-Type": "application/json", ...corsHeaders() }
@@ -463,5 +549,5 @@ topRouter.all("*", async (req, env) => {
 });
 
 export default {
-  fetch: (req, env) => topRouter.fetch(req, env),
+  fetch: (req, env) => topRouter.fetch(req, env)
 };

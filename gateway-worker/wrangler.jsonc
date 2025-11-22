@@ -4,7 +4,18 @@
   "main": "src/index.js",
   "type": "module",
   "compatibility_date": "2025-11-19",
-  "observability": { "enabled": true },
+  "observability": {
+    "enabled": true
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CART_DO",
+        "class_name": "CartDurableObject",
+        "script_name": "cart-worker"
+      }
+    ]
+  },
   "vars": {
     "PRODUCTS_SERVICE_URL": "https://product-worker.111naveenkumarrk.workers.dev",
     "INVENTORY_SERVICE_URL": "https://inventory-worker.111naveenkumarrk.workers.dev",
