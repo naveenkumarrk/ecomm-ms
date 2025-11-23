@@ -165,6 +165,10 @@ function parseJSON(row) {
   }
 }
 
+function parseUser(row) {
+  return parseJSON(row);
+}
+
 /* -------------------------------------------------------
    AUTH HELPERS
 ------------------------------------------------------- */
@@ -235,6 +239,82 @@ router.post("/auth/signup", async (req, env) => {
   );
 
   return json({ userId, email }, 201);
+});
+
+/* ---------------- ADMIN SIGNUP (Special endpoint for creating admin) ---------------- */
+router.post("/auth/admin/signup", async (req, env) => {
+  const body = await req.json();
+
+  if (!body.email || !body.password || !body.name)
+    return json({ error: "missing_fields" }, 400);
+
+  // Check for admin secret to protect this endpoint
+  const adminSecret = req.headers.get("x-admin-secret") || body.adminSecret;
+  const expectedSecret = env.ADMIN_SECRET || "adminsecret";
+  
+  if (!adminSecret || adminSecret !== expectedSecret) {
+    return json({ error: "unauthorized", message: "Admin creation secret required" }, 401);
+  }
+
+  const email = body.email.toLowerCase().trim();
+
+  const exists = await dbGet(env, "SELECT 1 FROM users WHERE email=?", [email]);
+  if (exists) return json({ error: "email_exists" }, 409);
+
+  const hashed = await hashPassword(body.password);
+
+  const userId = "usr_" + crypto.randomUUID();
+  const now = epoch();
+
+  const data = {
+    profile: { name: body.name },
+    addresses: [],
+    auth: { passwordHash: hashed }
+  };
+
+  await dbRun(
+    env,
+    `INSERT INTO users (userId,email,role,data,created_at,updated_at)
+     VALUES (?,?,?,?,?,?)`,
+    [userId, email, "admin", JSON.stringify(data), now, now]
+  );
+
+  return json({ userId, email, role: "admin" }, 201);
+});
+
+/* ---------------- PROMOTE USER TO ADMIN (Admin only) ---------------- */
+router.post("/auth/admin/promote", async (req, env) => {
+  const u = await requireAuth(req, env);
+  if (u instanceof Response) return u;
+
+  // Check if current user is admin
+  const currentUser = await dbGet(env, "SELECT role FROM users WHERE userId=?", [u.sub]);
+  if (!currentUser || currentUser.role !== "admin") {
+    return json({ error: "forbidden", message: "Admin access required" }, 403);
+  }
+
+  const body = await req.json();
+  if (!body.email && !body.userId) {
+    return json({ error: "missing_fields", message: "email or userId required" }, 400);
+  }
+
+  const identifier = body.userId || body.email.toLowerCase().trim();
+  const user = await dbGet(
+    env,
+    body.userId ? "SELECT * FROM users WHERE userId=?" : "SELECT * FROM users WHERE email=?",
+    [identifier]
+  );
+
+  if (!user) return json({ error: "user_not_found" }, 404);
+  if (user.role === "admin") return json({ error: "already_admin" }, 400);
+
+  await dbRun(
+    env,
+    "UPDATE users SET role=?, updated_at=? WHERE userId=?",
+    ["admin", epoch(), user.userId]
+  );
+
+  return json({ userId: user.userId, email: user.email, role: "admin" });
 });
 
 /* ---------------- LOGIN ---------------- */

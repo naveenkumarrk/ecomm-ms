@@ -323,6 +323,57 @@ router.post("/api/auth/login", async (req, env) => {
 });
 
 /* -------------------------------------------------------
+   ADMIN CREATION ROUTES
+------------------------------------------------------- */
+router.post("/api/auth/admin/signup", async (req, env) => {
+  console.log("[GATEWAY] /api/auth/admin/signup called");
+  
+  try {
+    const body = await req.json().catch(() => null);
+    
+    if (!body) {
+      return jsonRes({ error: "invalid_json" }, 400);
+    }
+
+    // Forward admin secret header if provided
+    const headers = {};
+    const adminSecret = req.headers.get("x-admin-secret");
+    if (adminSecret) {
+      headers["x-admin-secret"] = adminSecret;
+    }
+
+    const res = await callService("AUTH_SERVICE", "/auth/admin/signup", "POST", body, headers, null, env, 15000);
+    return jsonRes(res.body, res.status);
+    
+  } catch (error) {
+    console.error("[GATEWAY] /api/auth/admin/signup error:", error);
+    return jsonRes({ error: "gateway_error", message: error.message }, 500);
+  }
+});
+
+router.post("/api/auth/admin/promote", async (req, env) => {
+  const user = await requireAdmin(req, env);
+  if (user instanceof Response) return user;
+
+  try {
+    const body = await req.json().catch(() => null);
+    
+    if (!body) {
+      return jsonRes({ error: "invalid_json" }, 400);
+    }
+
+    const res = await callService("AUTH_SERVICE", "/auth/admin/promote", "POST", body, {
+      "Authorization": req.headers.get("Authorization")
+    }, user, env, 15000);
+    return jsonRes(res.body, res.status);
+    
+  } catch (error) {
+    console.error("[GATEWAY] /api/auth/admin/promote error:", error);
+    return jsonRes({ error: "gateway_error", message: error.message }, 500);
+  }
+});
+
+/* -------------------------------------------------------
    PRODUCT ROUTES
 ------------------------------------------------------- */
 router.get("/api/products", async (req, env) => {
@@ -666,12 +717,55 @@ router.post("/api/admin/products", async (req, env) => {
   const user = await requireAdmin(req, env);
   if (user instanceof Response) return user;
 
-  const body = await req.json();
-  const path = "/products";
-  const headers = await signedHeadersFor(env.ADMIN_SECRET || env.INTERNAL_SECRET, "POST", path, body);
-  
-  const res = await callService("PRODUCTS_SERVICE", path, "POST", body, headers, user, env);
-  return jsonRes(res.body, res.status);
+  try {
+    const contentType = req.headers.get("content-type") || "";
+    const isMultipart = contentType.includes("multipart/form-data");
+    const path = "/products";
+    
+    // For signature generation
+    let bodyText = "";
+    if (isMultipart) {
+      bodyText = ""; // Empty for multipart (boundary makes it unreliable)
+    } else {
+      bodyText = await req.clone().text();
+    }
+    
+    const headers = await signedHeadersFor(env.ADMIN_SECRET || env.INTERNAL_SECRET, "POST", path, bodyText);
+    
+    // Forward request with proper content type
+    const serviceBinding = env.PRODUCTS_SERVICE;
+    const serviceUrl = env.PRODUCTS_SERVICE_URL;
+    
+    const forwardedHeaders = new Headers(req.headers);
+    Object.entries(headers).forEach(([key, value]) => {
+      forwardedHeaders.set(key, value);
+    });
+    
+    let response;
+    if (serviceBinding && typeof serviceBinding.fetch === 'function') {
+      const forwardedReq = new Request(`https://internal${path}`, {
+        method: req.method,
+        headers: forwardedHeaders,
+        body: req.body
+      });
+      response = await serviceBinding.fetch(forwardedReq);
+    } else if (serviceUrl && serviceUrl.startsWith('http')) {
+      const fullUrl = serviceUrl.replace(/\/$/, "") + path;
+      response = await fetch(fullUrl, {
+        method: req.method,
+        headers: forwardedHeaders,
+        body: req.body
+      });
+    } else {
+      return jsonRes({ error: "service_not_configured" }, 502);
+    }
+    
+    const responseBody = await response.json().catch(() => ({ error: "Invalid response" }));
+    return jsonRes(responseBody, response.status);
+  } catch (error) {
+    console.error("[GATEWAY] Product creation error:", error);
+    return jsonRes({ error: "gateway_error", message: error.message }, 500);
+  }
 });
 
 router.put("/api/admin/products/:id", async (req, env) => {

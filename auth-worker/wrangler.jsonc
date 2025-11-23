@@ -17,6 +17,7 @@
  }],
  "vars": {
 	"ACCESS_TOKEN_TTL" : 86400,
+	"ADMIN_SECRET": "adminsecret",
 	"JWT_SECRET": "lw+prJIH54ibX8krgSqd+XtrWonIjJecKw4cUtvzLdQ="
 	 // 24h
  }
