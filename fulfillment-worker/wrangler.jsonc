@@ -32,9 +32,13 @@
     }
   ],
   "vars": {
-    "STANDARD_RATE": "50",
-    "EXPRESS_RATE": "100",
-    "FREE_SHIPPING_MIN": "999",
+    "TEST_MODE" : "false",
+"STANDARD_RATE" : "40",
+"EXPRESS_RATE" : "90",
+"PRIORITY_RATE" : "150",
+"FREE_SHIPPING_MIN" : "1000",
+"EXPRESS_DISCOUNT_MIN" : "2500",
+"EXPRESS_DISCOUNT_PERCENT" : "20",
     "INTERNAL_SECRET": "internalsecret"
   }
 }

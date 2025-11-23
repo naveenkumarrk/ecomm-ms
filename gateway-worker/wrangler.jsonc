@@ -16,13 +16,53 @@
       }
     ]
   },
+  "kv_namespaces": [
+    {
+      "binding": "DISCOUNT_KV",
+      "id": "23cbefa0cc0947368b52269d3e6e9a1d"
+    }
+  ],
   "vars": {
+    "AUTH_SERVICE_URL": "https://auth-worker.111naveenkumarrk.workers.dev",
     "PRODUCTS_SERVICE_URL": "https://product-worker.111naveenkumarrk.workers.dev",
     "INVENTORY_SERVICE_URL": "https://inventory-worker.111naveenkumarrk.workers.dev",
     "FULFILLMENT_SERVICE_URL": "https://fulfillment-worker.111naveenkumarrk.workers.dev",
     "PAYMENT_SERVICE_URL": "https://payment-worker.111naveenkumarrk.workers.dev",
     "CART_SERVICE_URL": "https://cart-worker.111naveenkumarrk.workers.dev",
     "ORDER_SERVICE_URL": "https://order-worker.111naveenkumarrk.workers.dev",
-    "INTERNAL_SECRET": "internalsecret"
-  }
+    "INTERNAL_SECRET": "internalsecret",
+    "ADMIN_SECRET": "adminsecret",
+    "ACCESS_TOKEN_TTL": 86400,
+    "JWT_SECRET": "lw+prJIH54ibX8krgSqd+XtrWonIjJecKw4cUtvzLdQ="
+  },
+  "services": [
+    {
+      "binding": "AUTH_SERVICE",
+      "service": "auth-worker"
+    },
+    {
+      "binding": "PRODUCTS_SERVICE",
+      "service": "product-worker"
+    },
+    {
+      "binding": "INVENTORY_SERVICE",
+      "service": "inventory-worker"
+    },
+    {
+      "binding": "FULFILLMENT_SERVICE",
+      "service": "fulfillment-worker"
+    },
+    {
+      "binding": "PAYMENT_SERVICE",
+      "service": "payment-worker"
+    },
+    {
+      "binding": "CART_SERVICE",
+      "service": "cart-worker"
+    },
+    {
+      "binding": "ORDER_SERVICE",
+      "service": "order-worker"
+    }
+  ]
 }

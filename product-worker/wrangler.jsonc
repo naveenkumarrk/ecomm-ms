@@ -3,6 +3,7 @@
   "name": "product-worker",
   "main": "src/index.js",
   "compatibility_date": "2025-11-18",
+
   "observability": {
     "enabled": true
   },

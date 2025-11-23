@@ -9,12 +9,22 @@
 	"compatibility_date": "2025-11-21",
 	"observability": {
 		"enabled": true
-	}
+	},
+	"d1_databases": [{
+    "binding": "DB",
+    "database_name": "auth-db",
+    "database_id": "b050b9a8-0fa3-4e87-8893-b22a397cb853"
+ }],
+ "vars": {
+	"ACCESS_TOKEN_TTL" : 86400,
+	"JWT_SECRET": "lw+prJIH54ibX8krgSqd+XtrWonIjJecKw4cUtvzLdQ="
+	 // 24h
+ }
 	/**
 	 * Smart Placement
 	 * Docs: https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
 	 */
-	// "placement": { "mode": "smart" }
+	// "placement": { "mode": "s p. p xmart" }
 	/**
 	 * Bindings
 	 * Bindings allow your Worker to interact with resources on the Cloudflare Developer Platform, including

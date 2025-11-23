@@ -1,8 +1,8 @@
-// order-worker/index.js
+// order-worker/index.js - AUTH-AWARE VERSION
 import { Router } from "itty-router";
 
 /* -------------------------
-   HMAC helpers (same)
+   HMAC helpers
 --------------------------*/
 async function hmacHex(secret, message) {
   const enc = new TextEncoder();
@@ -10,12 +10,14 @@ async function hmacHex(secret, message) {
   const sig = await crypto.subtle.sign("HMAC", key, enc.encode(message));
   return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
 }
+
 function constantTimeEqual(a = "", b = "") {
   if (a.length !== b.length) return false;
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return diff === 0;
 }
+
 async function verifySignature(req, secret, env) {
   const dev = req.headers.get("x-dev-mode");
   if (dev && env.DEV_SECRET && dev === env.DEV_SECRET) {
@@ -41,70 +43,230 @@ async function verifySignature(req, secret, env) {
    Router
 --------------------------*/
 const router = Router();
-const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,OPTIONS", "Access-Control-Allow-Headers": "Content-Type, X-Timestamp, X-Signature, X-Dev-Mode" };
+const CORS = { 
+  "Access-Control-Allow-Origin": "*", 
+  "Access-Control-Allow-Methods": "GET,POST,OPTIONS", 
+  "Access-Control-Allow-Headers": "Content-Type, X-Timestamp, X-Signature, X-Dev-Mode, X-User-Id, X-User-Role" 
+};
+
 router.options("*", () => new Response("OK", { headers: CORS }));
 
-function jsonErr(obj, status = 500) { return new Response(JSON.stringify(obj), { status, headers: { "Content-Type": "application/json", ...CORS } }); }
+function jsonErr(obj, status = 500) { 
+  return new Response(JSON.stringify(obj), { 
+    status, 
+    headers: { "Content-Type": "application/json", ...CORS } 
+  }); 
+}
 
-router.get("/health", () => new Response(JSON.stringify({ status: "ok", service: "order-service" }), { headers: { "Content-Type": "application/json", ...CORS } }));
+router.get("/health", () => 
+  new Response(JSON.stringify({ status: "ok", service: "order-service" }), { 
+    headers: { "Content-Type": "application/json", ...CORS } 
+  })
+);
 
+/* -------------------------
+   CREATE ORDER (Internal)
+--------------------------*/
 router.post("/orders/create", async (req, env) => {
   console.log("[ORDERS.CREATE] start");
   const ok = await verifySignature(req, env.INTERNAL_SECRET, env);
   if (!ok) return jsonErr({ error: "unauthorized" }, 401);
 
   const payload = await req.json().catch(() => ({}));
-  const { reservationId, orderId, payment, userId, email, items = [], address = null, shipping = null } = payload;
+  const { 
+    reservationId, 
+    orderId, 
+    payment, 
+    userId, 
+    email, 
+    items = [], 
+    address = null, 
+    shipping = null 
+  } = payload;
 
-  if (!reservationId || !orderId || !payment) return jsonErr({ error: "missing_fields", received: { reservationId: !!reservationId, orderId: !!orderId, payment: !!payment } }, 400);
+  if (!reservationId || !orderId || !payment) {
+    return jsonErr({ 
+      error: "missing_fields", 
+      received: { 
+        reservationId: !!reservationId, 
+        orderId: !!orderId, 
+        payment: !!payment 
+      } 
+    }, 400);
+  }
 
   try {
     if (!env.DB) return jsonErr({ error: "database_not_configured" }, 500);
 
-    // check existing by orderId or reservationId
-    const existing = await env.DB.prepare("SELECT order_id FROM orders WHERE order_id = ? OR reservation_id = ?").bind(orderId, reservationId).first();
-    if (existing) return new Response(JSON.stringify({ ok: true, orderId: existing.order_id, message: "order_already_exists" }), { status: 200, headers: { "Content-Type": "application/json", ...CORS } });
+    // Check existing by orderId or reservationId
+    const existing = await env.DB.prepare(
+      "SELECT order_id FROM orders WHERE order_id = ? OR reservation_id = ?"
+    ).bind(orderId, reservationId).first();
+    
+    if (existing) {
+      return new Response(
+        JSON.stringify({ 
+          ok: true, 
+          orderId: existing.order_id, 
+          message: "order_already_exists" 
+        }), 
+        { status: 200, headers: { "Content-Type": "application/json", ...CORS } }
+      );
+    }
 
     const now = Date.now();
-    const result = await env.DB.prepare(`
-      INSERT INTO orders (order_id, reservation_id, user_id, email, amount, currency, status, items_json, address_json, shipping_json, payment_json, created_at, updated_at)
+    
+    await env.DB.prepare(`
+      INSERT INTO orders (
+        order_id, reservation_id, user_id, email, amount, currency, status, 
+        items_json, address_json, shipping_json, payment_json, created_at, updated_at
+      )
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(orderId, reservationId, userId || null, email || null, payment.amount || null, payment.currency || null, "paid", JSON.stringify(items || []), JSON.stringify(address || null), JSON.stringify(shipping || null), JSON.stringify(payment), now, now).run();
+    `).bind(
+      orderId, 
+      reservationId, 
+      userId || null, 
+      email || null, 
+      payment.amount || null, 
+      payment.currency || null, 
+      "paid", 
+      JSON.stringify(items || []), 
+      JSON.stringify(address || null), 
+      JSON.stringify(shipping || null), 
+      JSON.stringify(payment), 
+      now, 
+      now
+    ).run();
 
-    // verify
-    const verify = await env.DB.prepare("SELECT order_id FROM orders WHERE order_id = ?").bind(orderId).first();
-    if (!verify) return jsonErr({ error: "insertion_verification_failed", orderId }, 500);
+    // Verify insertion
+    const verify = await env.DB.prepare(
+      "SELECT order_id FROM orders WHERE order_id = ?"
+    ).bind(orderId).first();
+    
+    if (!verify) {
+      return jsonErr({ error: "insertion_verification_failed", orderId }, 500);
+    }
 
-    return new Response(JSON.stringify({ ok: true, orderId, created_at: now }), { status: 200, headers: { "Content-Type": "application/json", ...CORS } });
+    return new Response(
+      JSON.stringify({ ok: true, orderId, created_at: now }), 
+      { status: 200, headers: { "Content-Type": "application/json", ...CORS } }
+    );
   } catch (err) {
     console.error("order create error", err);
     return jsonErr({ error: "database_error", message: String(err) }, 500);
   }
 });
 
+/* -------------------------
+   GET ORDER BY ID
+--------------------------*/
 router.get("/orders/:orderId", async (req, env) => {
   try {
     if (!env.DB) return jsonErr({ error: "database_not_configured" }, 500);
+    
     const { orderId } = req.params;
-    const row = await env.DB.prepare("SELECT * FROM orders WHERE order_id = ?").bind(orderId).first();
+    const row = await env.DB.prepare(
+      "SELECT * FROM orders WHERE order_id = ?"
+    ).bind(orderId).first();
+    
     if (!row) return jsonErr({ error: "not_found" }, 404);
+    
+    // Parse JSON fields
     row.items_json = JSON.parse(row.items_json || "[]");
     row.address_json = JSON.parse(row.address_json || "null");
     row.shipping_json = JSON.parse(row.shipping_json || "null");
     row.payment_json = JSON.parse(row.payment_json || "null");
-    return new Response(JSON.stringify(row), { status: 200, headers: { "Content-Type": "application/json", ...CORS } });
+    
+    // Note: Gateway should verify user ownership before returning
+    
+    return new Response(
+      JSON.stringify(row), 
+      { status: 200, headers: { "Content-Type": "application/json", ...CORS } }
+    );
   } catch (err) {
     console.error("get order error", err);
     return jsonErr({ error: "database_error", message: String(err) }, 500);
   }
 });
 
-router.get("/debug/list-orders", async (req, env) => {
-  if (!env.DB) return jsonErr({ error: "database_not_configured" }, 500);
-  const rows = await env.DB.prepare("SELECT * FROM orders ORDER BY created_at DESC LIMIT 20").all();
-  return new Response(JSON.stringify({ count: rows.results.length, orders: rows.results }), { status: 200, headers: { "Content-Type": "application/json", ...CORS } });
+/* -------------------------
+   GET USER ORDERS (NEW)
+--------------------------*/
+router.get("/orders/user/:userId", async (req, env) => {
+  try {
+    if (!env.DB) return jsonErr({ error: "database_not_configured" }, 500);
+    
+    const { userId } = req.params;
+    
+    // Get user context from headers (set by gateway)
+    const requestUserId = req.headers.get("x-user-id");
+    const requestUserRole = req.headers.get("x-user-role");
+    
+    // Verify user can only access their own orders (unless admin)
+    if (requestUserId !== userId && requestUserRole !== 'admin') {
+      return jsonErr({ error: "forbidden" }, 403);
+    }
+    
+    const rows = await env.DB.prepare(
+      "SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC LIMIT 50"
+    ).bind(userId).all();
+    
+    const orders = (rows.results || []).map(row => ({
+      ...row,
+      items_json: JSON.parse(row.items_json || "[]"),
+      address_json: JSON.parse(row.address_json || "null"),
+      shipping_json: JSON.parse(row.shipping_json || "null"),
+      payment_json: JSON.parse(row.payment_json || "null")
+    }));
+    
+    return new Response(
+      JSON.stringify({ orders }), 
+      { status: 200, headers: { "Content-Type": "application/json", ...CORS } }
+    );
+  } catch (err) {
+    console.error("get user orders error", err);
+    return jsonErr({ error: "database_error", message: String(err) }, 500);
+  }
 });
 
-router.all("*", (req) => jsonErr({ error: "not_found", path: new URL(req.url).pathname, method: req.method }, 404));
+/* -------------------------
+   ADMIN: LIST ALL ORDERS
+--------------------------*/
+router.get("/debug/list-orders", async (req, env) => {
+  // This should only be called by gateway with admin verification
+  const requestUserRole = req.headers.get("x-user-role");
+  if (requestUserRole !== 'admin') {
+    return jsonErr({ error: "admin_only" }, 403);
+  }
+  
+  if (!env.DB) return jsonErr({ error: "database_not_configured" }, 500);
+  
+  const rows = await env.DB.prepare(
+    "SELECT * FROM orders ORDER BY created_at DESC LIMIT 100"
+  ).all();
+  
+  const orders = (rows.results || []).map(row => ({
+    ...row,
+    items_json: JSON.parse(row.items_json || "[]"),
+    address_json: JSON.parse(row.address_json || "null"),
+    shipping_json: JSON.parse(row.shipping_json || "null"),
+    payment_json: JSON.parse(row.payment_json || "null")
+  }));
+  
+  return new Response(
+    JSON.stringify({ count: orders.length, orders }), 
+    { status: 200, headers: { "Content-Type": "application/json", ...CORS } }
+  );
+});
 
-export default { fetch: (req, env) => router.fetch(req, env) };
+router.all("*", (req) => 
+  jsonErr({ 
+    error: "not_found", 
+    path: new URL(req.url).pathname, 
+    method: req.method 
+  }, 404)
+);
+
+export default { 
+  fetch: (req, env) => router.fetch(req, env) 
+};
