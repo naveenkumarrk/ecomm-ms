@@ -3,6 +3,12 @@ on:
   push:
     branches: [main]
 
+environment: production
+
+concurrency:
+  group: cd-main-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   detect:
     uses: ./.github/workflows/detect-changes.yaml
@@ -13,7 +19,6 @@ jobs:
   deploy:
     needs: detect
     if: needs.detect.outputs.has-changes == 'true'
-    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -27,7 +32,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
   notify:
-    needs: deploy
+    needs: [deploy, detect]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -40,12 +45,12 @@ jobs:
               "text": "<!here> @ecomm-ms Production deploy finished",
               "blocks":[
                 {"type":"section","text":{"type":"mrkdwn","text":"*Production deploy finished*"}},
-                {"type":"section","fields":[{"type":"mrkdwn","text":"*Services:*"},{"type":"mrkdwn","text":"${{ needs.detect.outputs.services }}"}]}
+                {"type":"section","fields":[{"type":"mrkdwn","text":"*Services:* ${{ needs.detect.outputs.services }}"}]}
               ]
             }
 
   rollback:
-    needs: deploy
+    needs: [deploy, detect]
     if: failure()
     runs-on: ubuntu-latest
     strategy:
@@ -57,33 +62,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download last-good artifact for service
-        uses: actions/download-artifact@v4
-        with:
-          name: last-good-production-${{ matrix.service }}
-          path: .deployments
-        continue-on-error: true
-
       - name: Rollback service to last known good
         working-directory: ${{ matrix.service }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          LAST_GOOD_FILE=".deployments/${{ matrix.service }}-production-last-good.txt"
-          if [ -f "$LAST_GOOD_FILE" ]; then
-            LAST_GOOD=$(cat "$LAST_GOOD_FILE")
-            if [ -n "$LAST_GOOD" ]; then
-              echo "Rolling back ${{ matrix.service }} to $LAST_GOOD"
-              npx wrangler rollback --deployment-id "$LAST_GOOD" || npx wrangler rollback || true
-            else
-              echo "No deployment id in artifact; trying standard rollback"
-              npx wrangler rollback || true
-            fi
-          else
-            echo "Artifact not found; attempting standard rollback"
-            npx wrangler rollback || true
-          fi
+          echo "Attempting rollback for ${{ matrix.service }}"
+          npx wrangler rollback || true
 
       - name: Slack Rollback Notification
         uses: slackapi/slack-github-action@v1

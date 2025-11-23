@@ -49,7 +49,6 @@ jobs:
   service-checks:
     needs: [detect, knip-check]
     if: needs.detect.outputs.has-changes == 'true'
-    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -79,47 +78,45 @@ jobs:
         with:
           github-token: ${{ secrets.PAT_TOKEN }}
           script: |
-          const pr = context.payload.pull_request;
-          if (!pr) {
-            core.setFailed("No pull_request in event payload");
-            return;
-          }
+            const pr = context.payload.pull_request;
+            if (!pr) {
+              core.setFailed("No pull_request in event payload");
+              return;
+            }
 
-          const { owner, repo } = context.repo;
-          const prNumber = pr.number;
+            const { owner, repo } = context.repo;
+            const prNumber = pr.number;
 
-          // Retrieve fresh PR data
-          const { data: prData } = await github.rest.pulls.get({
-            owner,
-            repo,
-            pull_number: prNumber
-          });
+            // Retrieve fresh PR data
+            const { data: prData } = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number: prNumber
+            });
 
-          if (prData.state !== "open") {
-            core.info(`PR #${prNumber} is not open. Skipping merge.`);
-            return;
-          }
+            if (prData.state !== "open") {
+              core.info(`PR #${prNumber} is not open. Skipping merge.`);
+              return;
+            }
 
-          if (prData.mergeable === false) {
-            core.info(`PR #${prNumber} is not mergeable. Skipping merge.`);
-            return;
-          }
+            if (prData.mergeable === false) {
+              core.info(`PR #${prNumber} is not mergeable. Skipping merge.`);
+              return;
+            }
 
-          // Merge using squash
-          await github.rest.pulls.merge({
-            owner,
-            repo,
-            pull_number: prNumber,
-            merge_method: "squash"
-          });
+            // Merge using squash
+            await github.rest.pulls.merge({
+              owner,
+              repo,
+              pull_number: prNumber,
+              merge_method: "squash"
+            });
 
-          core.info(`PR #${prNumber} merged successfully.`);
-
-
+            core.info(`PR #${prNumber} merged successfully.`);
 
   # 5) Notify Slack about CI result (success / failure)
   notify:
-    needs: [auto-merge]
+    needs: [auto-merge, detect]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -133,8 +130,8 @@ jobs:
               "blocks": [
                 { "type": "section", "text": { "type": "mrkdwn", "text": "*CI Feature Result*"} },
                 { "type": "section", "fields": [
-                    { "type": "mrkdwn", "text": "*Repo:*\n<{{ github.server_url }}/${{ github.repository }}>" },
-                    { "type": "mrkdwn", "text": "*PR:*\n<#${{ github.event.pull_request.number }}|${{ github.event.pull_request.title }}>" },
+                    { "type": "mrkdwn", "text": "*Repo:*\n${{ github.server_url }}/${{ github.repository }}" },
+                    { "type": "mrkdwn", "text": "*PR:*\n#${{ github.event.pull_request.number }} - ${{ github.event.pull_request.title }}" },
                     { "type": "mrkdwn", "text": "*Result:*\n${{ needs.auto-merge.result }}" },
                     { "type": "mrkdwn", "text": "*Services:*\n${{ needs.detect.outputs.services }}" }
                 ] }

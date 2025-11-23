@@ -7,7 +7,7 @@ on:
         type: string
     outputs:
       checks-status:
-        type: string
+        value: ${{ jobs.check.outputs.checks-status }}
 
 jobs:
   check:
@@ -59,12 +59,12 @@ jobs:
           COVERAGE=$(node -e "const d=require('./coverage/coverage-summary.json'); console.log(d.total.lines.pct)")
           echo "Coverage for ${{ inputs.service }}: $COVERAGE%"
           # integer comparison
-          python - <<PY
-C = int(round(float("${COVERAGE}")))
-if C < 90:
-    raise SystemExit("coverage-failed")
-print("OK")
-PY
+          python3 - <<PY
+          C = int(round(float("${COVERAGE}")))
+          if C < 90:
+              raise SystemExit("coverage-failed")
+          print("OK")
+          PY
           echo "Coverage threshold satisfied"
 
       - name: Final status

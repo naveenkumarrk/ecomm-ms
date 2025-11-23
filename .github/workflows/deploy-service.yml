@@ -13,20 +13,22 @@ on:
         required: false
         type: string
     secrets:
-      CLOUDFLARE_API_TOKEN: required
-      CLOUDFLARE_ACCOUNT_ID: required
+      CLOUDFLARE_API_TOKEN:
+        required: true
+      CLOUDFLARE_ACCOUNT_ID:
+        required: true
     outputs:
       deployment-id:
-        type: string
+        value: ${{ jobs.deploy.outputs.deployment-id }}
       deployment-status:
-        type: string
+        value: ${{ jobs.deploy.outputs.deployment-status }}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     outputs:
-      deployment-id: ${{ steps.set.outputs.deployment-id }}
-      deployment-status: ${{ steps.set.outputs.deployment-status }}
+      deployment-id: ${{ steps.deploy-step.outputs.deployment-id }}
+      deployment-status: ${{ steps.deploy-step.outputs.deployment-status }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -63,40 +65,18 @@ jobs:
           echo "Running: $CMD"
           OUTPUT=$($CMD 2>&1 || true)
           echo "$OUTPUT"
-
+          
           DEPLOYMENT_ID=$(echo "$OUTPUT" | grep -oP 'deployment-id: \K[a-f0-9-]+' || true)
           DEPLOYMENT_ID=${DEPLOYMENT_ID:-$(echo "$OUTPUT" | grep -oP 'id: \K[a-f0-9-]+' || true)}
           if [ -z "$DEPLOYMENT_ID" ]; then
             DEPLOYMENT_ID="$(date +%s)-${{ inputs.service }}-${{ inputs.environment }}"
           fi
-
           echo "deployment-id=$DEPLOYMENT_ID" >> $GITHUB_OUTPUT
-
+          
           if echo "$OUTPUT" | grep -qE "(deployed|Published|Successfully)"; then
             echo "deployment-status=success" >> $GITHUB_OUTPUT
-            # persist last-good file
-            mkdir -p .deployments
-            echo "$DEPLOYMENT_ID" > .deployments/${{ inputs.service }}-${{ inputs.environment }}-last-good.txt
           else
             echo "deployment-status=failure" >> $GITHUB_OUTPUT
             echo "::error::Deployment failed for ${{ inputs.service }} (${{ inputs.environment }})"
             exit 1
           fi
-
-      - name: Upload last-good artifact (if success)
-        if: steps.deploy-step.outcome == 'success'
-        uses: actions/upload-artifact@v4
-        with:
-          name: last-good-${{ inputs.environment }}-${{ inputs.service }}
-          path: .deployments/${{ inputs.service }}-${{ inputs.environment }}-last-good.txt
-          retention-days: 90
-
-      - name: Set outputs (compat)
-        id: set
-        run: |
-          # read values (some runners require this)
-          echo "deployment-id=${{ steps.deploy-step.outputs.deployment-id }}" >> $GITHUB_OUTPUT || true
-          echo "deployment-status=${{ steps.deploy-step.outputs.deployment-status }}" >> $GITHUB_OUTPUT || true
-          # also set job outputs
-          echo "::set-output name=deployment-id::$(cat .deployments/${{ inputs.service }}-${{ inputs.environment }}-last-good.txt 2>/dev/null || echo '')" || true
-          echo "::set-output name=deployment-status::${{ steps.deploy-step.outputs.deployment-status }}" || true

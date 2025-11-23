@@ -10,11 +10,11 @@ on:
         type: string
     outputs:
       services-json:
-        type: string
+        value: ${{ jobs.detect.outputs.services-json }}
       services:
-        type: string
+        value: ${{ jobs.detect.outputs.services }}
       has-changes:
-        type: string
+        value: ${{ jobs.detect.outputs.has-changes }}
 
 jobs:
   detect:
@@ -42,7 +42,6 @@ jobs:
           if [ -z "$CHANGED_FILES" ]; then
             CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD || true)
           fi
-
           SERVICES_ARRAY=()
           HAS_CHANGES="false"
           for SERVICE in auth-worker cart-worker fulfillment-worker gateway-worker inventory-worker order-worker payment-worker product-worker; do
@@ -51,19 +50,15 @@ jobs:
               HAS_CHANGES="true"
             fi
           done
-
           if echo "$CHANGED_FILES" | grep -qE "^(package\.json|knip\.json|\.github/|\.prettierrc)"; then
             HAS_CHANGES="true"
             SERVICES_ARRAY=("auth-worker" "cart-worker" "fulfillment-worker" "gateway-worker" "inventory-worker" "order-worker" "payment-worker" "product-worker")
           fi
-
           SERVICES_JSON=$(printf '%s\n' "${SERVICES_ARRAY[@]}" | jq -R . | jq -s .)
           SERVICES_STRING=$(IFS=' '; echo "${SERVICES_ARRAY[*]}")
-
           echo "services-json=$SERVICES_JSON" >> $GITHUB_OUTPUT
           echo "services=$SERVICES_STRING" >> $GITHUB_OUTPUT
           echo "has-changes=$HAS_CHANGES" >> $GITHUB_OUTPUT
-
           if [ "$HAS_CHANGES" = "true" ]; then
             echo "Detected services: $SERVICES_STRING"
           else

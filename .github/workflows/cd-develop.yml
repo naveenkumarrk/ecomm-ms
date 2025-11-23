@@ -2,6 +2,7 @@ name: CD Develop (Staging Deploy)
 on:
   push:
     branches: [develop]
+
 environment: staging
 
 concurrency:
@@ -18,7 +19,6 @@ jobs:
   deploy:
     needs: detect
     if: needs.detect.outputs.has-changes == 'true'
-    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -33,7 +33,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
   integration-tests:
-    needs: deploy
+    needs: [deploy, detect]
     if: needs.deploy.result == 'success'
     runs-on: ubuntu-latest
     strategy:
@@ -83,7 +83,7 @@ jobs:
           git push https://x-access-token:${{ secrets.PAT_TOKEN }}@github.com/${{ github.repository }} main
 
   rollback:
-    needs: [deploy, integration-tests]
+    needs: [deploy, integration-tests, detect]
     if: failure()
     runs-on: ubuntu-latest
     strategy:
@@ -95,33 +95,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download last-good artifact for service
-        uses: actions/download-artifact@v4
-        with:
-          name: last-good-staging-${{ matrix.service }}
-          path: .deployments
-        continue-on-error: true
-
       - name: Rollback to last known good
         working-directory: ${{ matrix.service }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          LAST_GOOD_FILE=".deployments/${{ matrix.service }}-staging-last-good.txt"
-          if [ -f "$LAST_GOOD_FILE" ]; then
-            LAST_GOOD=$(cat "$LAST_GOOD_FILE")
-            if [ -n "$LAST_GOOD" ]; then
-              echo "Rolling back ${{ matrix.service }} to $LAST_GOOD"
-              npx wrangler rollback --env staging --deployment-id "$LAST_GOOD" || npx wrangler rollback --env staging || true
-            else
-              echo "No deployment id in artifact, attempting standard rollback"
-              npx wrangler rollback --env staging || true
-            fi
-          else
-            echo "No artifact found; attempting standard rollback"
-            npx wrangler rollback --env staging || true
-          fi
+          echo "Attempting rollback for ${{ matrix.service }}"
+          npx wrangler rollback --env staging || true
 
       - name: Send Slack Rollback Notification
         uses: slackapi/slack-github-action@v1
