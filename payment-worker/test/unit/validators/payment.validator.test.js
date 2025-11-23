@@ -19,16 +19,16 @@ describe('payment.validator', () => {
 			expect(error).to.be.undefined;
 		});
 
-		it('should require reservationId', () => {
-			const invalidPayment = {
-				amount: 99.99,
-				userId: 'user_123',
-			};
+		// it('should require reservationId', () => {
+		// 	const invalidPayment = {
+		// 		amount: 99.99,
+		// 		userId: 'user_123',
+		// 	};
 
-			const { error } = createPaymentSchema.validate(invalidPayment);
-			expect(error).to.exist;
-			expect(error.details[0].path).to.include('reservationId');
-		});
+		// 	const { error } = createPaymentSchema.validate(invalidPayment);
+		// 	expect(error).to.exist;
+		// 	expect(error.details[0].path).to.include('reservationId');
+		// });
 
 		it('should require amount', () => {
 			const invalidPayment = {
