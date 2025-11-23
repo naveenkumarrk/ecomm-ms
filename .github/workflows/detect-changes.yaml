@@ -1,0 +1,71 @@
+name: Detect Changed Services
+on:
+  workflow_call:
+    inputs:
+      base-ref:
+        required: false
+        type: string
+      compare-ref:
+        required: false
+        type: string
+    outputs:
+      services-json:
+        type: string
+      services:
+        type: string
+      has-changes:
+        type: string
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      services-json: ${{ steps.out.outputs.services-json }}
+      services: ${{ steps.out.outputs.services }}
+      has-changes: ${{ steps.out.outputs.has-changes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Detect Changed Services
+        id: out
+        run: |
+          BASE=${{ inputs.base-ref || 'origin/develop' }}
+          COMPARE=${{ inputs.compare-ref || 'HEAD' }}
+          echo "Comparing $BASE ... $COMPARE"
+          git fetch --no-tags --depth=1 origin || true
+          CHANGED_FILES=$(git diff --name-only "$BASE...$COMPARE" || true)
+          if [ -z "$CHANGED_FILES" ]; then
+            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD || true)
+          fi
+
+          SERVICES_ARRAY=()
+          HAS_CHANGES="false"
+          for SERVICE in auth-worker cart-worker fulfillment-worker gateway-worker inventory-worker order-worker payment-worker product-worker; do
+            if echo "$CHANGED_FILES" | grep -q "^$SERVICE/"; then
+              SERVICES_ARRAY+=("$SERVICE")
+              HAS_CHANGES="true"
+            fi
+          done
+
+          if echo "$CHANGED_FILES" | grep -qE "^(package\.json|knip\.json|\.github/|\.prettierrc)"; then
+            HAS_CHANGES="true"
+            SERVICES_ARRAY=("auth-worker" "cart-worker" "fulfillment-worker" "gateway-worker" "inventory-worker" "order-worker" "payment-worker" "product-worker")
+          fi
+
+          SERVICES_JSON=$(printf '%s\n' "${SERVICES_ARRAY[@]}" | jq -R . | jq -s .)
+          SERVICES_STRING=$(IFS=' '; echo "${SERVICES_ARRAY[*]}")
+
+          echo "services-json=$SERVICES_JSON" >> $GITHUB_OUTPUT
+          echo "services=$SERVICES_STRING" >> $GITHUB_OUTPUT
+          echo "has-changes=$HAS_CHANGES" >> $GITHUB_OUTPUT
+
+          if [ "$HAS_CHANGES" = "true" ]; then
+            echo "Detected services: $SERVICES_STRING"
+          else
+            echo "No service changes detected"
+          fi

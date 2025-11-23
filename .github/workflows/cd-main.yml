@@ -1,0 +1,99 @@
+name: CD Main (Production Deploy)
+on:
+  push:
+    branches: [main]
+
+jobs:
+  detect:
+    uses: ./.github/workflows/detect-changes.yaml
+    with:
+      base-ref: origin/main
+      compare-ref: HEAD
+
+  deploy:
+    needs: detect
+    if: needs.detect.outputs.has-changes == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.detect.outputs.services-json) }}
+    uses: ./.github/workflows/deploy-service.yml
+    with:
+      service: ${{ matrix.service }}
+      environment: production
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+  notify:
+    needs: deploy
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Slack Notification
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          payload: |
+            {
+              "text": "<!here> @ecomm-ms Production deploy finished",
+              "blocks":[
+                {"type":"section","text":{"type":"mrkdwn","text":"*Production deploy finished*"}},
+                {"type":"section","fields":[{"type":"mrkdwn","text":"*Services:*"},{"type":"mrkdwn","text":"${{ needs.detect.outputs.services }}"}]}
+              ]
+            }
+
+  rollback:
+    needs: deploy
+    if: failure()
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.detect.outputs.services-json) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download last-good artifact for service
+        uses: actions/download-artifact@v4
+        with:
+          name: last-good-production-${{ matrix.service }}
+          path: .deployments
+        continue-on-error: true
+
+      - name: Rollback service to last known good
+        working-directory: ${{ matrix.service }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          LAST_GOOD_FILE=".deployments/${{ matrix.service }}-production-last-good.txt"
+          if [ -f "$LAST_GOOD_FILE" ]; then
+            LAST_GOOD=$(cat "$LAST_GOOD_FILE")
+            if [ -n "$LAST_GOOD" ]; then
+              echo "Rolling back ${{ matrix.service }} to $LAST_GOOD"
+              npx wrangler rollback --deployment-id "$LAST_GOOD" || npx wrangler rollback || true
+            else
+              echo "No deployment id in artifact; trying standard rollback"
+              npx wrangler rollback || true
+            fi
+          else
+            echo "Artifact not found; attempting standard rollback"
+            npx wrangler rollback || true
+          fi
+
+      - name: Slack Rollback Notification
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          payload: |
+            {
+              "text": "<!here> @ecomm-ms Production deployment failed — rolled back",
+              "blocks":[
+                {"type":"section","text":{"type":"mrkdwn","text":"*Production Rollback Performed*"}},
+                {"type":"section","fields":[{"type":"mrkdwn","text":"*Service:* ${{ matrix.service }}"}]}
+              ]
+            }

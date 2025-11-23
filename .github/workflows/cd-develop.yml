@@ -1,0 +1,137 @@
+name: CD Develop (Staging Deploy)
+on:
+  push:
+    branches: [develop]
+environment: staging
+
+concurrency:
+  group: cd-develop-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    uses: ./.github/workflows/detect-changes.yaml
+    with:
+      base-ref: origin/develop
+      compare-ref: HEAD
+
+  deploy:
+    needs: detect
+    if: needs.detect.outputs.has-changes == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.detect.outputs.services-json) }}
+    uses: ./.github/workflows/deploy-service.yml
+    with:
+      service: ${{ matrix.service }}
+      environment: staging
+      wrangler-env: staging
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+  integration-tests:
+    needs: deploy
+    if: needs.deploy.result == 'success'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.detect.outputs.services-json) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run integration tests for service
+        working-directory: ${{ matrix.service }}
+        env:
+          STAGING_URL: ${{ secrets.STAGING_URL }}
+        run: |
+          npm ci
+          npm run test:integration || exit 1
+
+  merge-to-main:
+    needs: [integration-tests]
+    if: success()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.PAT_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Auto-merge develop → main using PAT
+        run: |
+          git fetch origin main
+          git checkout main
+          git merge origin/develop --no-ff -m "Auto merge develop → main (post-staging tests) [skip ci]"
+          git push https://x-access-token:${{ secrets.PAT_TOKEN }}@github.com/${{ github.repository }} main
+
+  rollback:
+    needs: [deploy, integration-tests]
+    if: failure()
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.detect.outputs.services-json) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download last-good artifact for service
+        uses: actions/download-artifact@v4
+        with:
+          name: last-good-staging-${{ matrix.service }}
+          path: .deployments
+        continue-on-error: true
+
+      - name: Rollback to last known good
+        working-directory: ${{ matrix.service }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          LAST_GOOD_FILE=".deployments/${{ matrix.service }}-staging-last-good.txt"
+          if [ -f "$LAST_GOOD_FILE" ]; then
+            LAST_GOOD=$(cat "$LAST_GOOD_FILE")
+            if [ -n "$LAST_GOOD" ]; then
+              echo "Rolling back ${{ matrix.service }} to $LAST_GOOD"
+              npx wrangler rollback --env staging --deployment-id "$LAST_GOOD" || npx wrangler rollback --env staging || true
+            else
+              echo "No deployment id in artifact, attempting standard rollback"
+              npx wrangler rollback --env staging || true
+            fi
+          else
+            echo "No artifact found; attempting standard rollback"
+            npx wrangler rollback --env staging || true
+          fi
+
+      - name: Send Slack Rollback Notification
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          payload: |
+            {
+              "text": "<!here> @ecomm-ms Staging deployment failed — rolled back",
+              "blocks":[
+                {"type":"section","text":{"type":"mrkdwn","text":"*Staging Rollback Performed*"}},
+                {"type":"section","fields":[{"type":"mrkdwn","text":"*Service:* ${{ matrix.service }}"}]}
+              ]
+            }
