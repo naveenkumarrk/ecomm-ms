@@ -20,9 +20,16 @@
       "id": "8325754ce69246bba778fa1dfcf98e93"
     }
   ],
+  "r2_buckets": [
+    {
+      "binding": "PRODUCT_IMAGES",
+      "bucket_name": "product-images"
+    }
+  ],
   "vars": {
     "INTERNAL_SECRET": "internalsecret",
     "ADMIN_SECRET": "adminsecret",
-    "INVENTORY_SERVICE_URL": "https://inventory-worker.111naveenkumarrk.workers.dev"
+    "INVENTORY_SERVICE_URL": "https://inventory-worker.111naveenkumarrk.workers.dev",
+    "R2_PUBLIC_URL": "https://pub-dce3c33e23b9434c80634889d98298b8.r2.dev"
   }
 }

@@ -181,6 +181,99 @@ router.get("/products/:id", async (req, env) => {
   return jsonResponse(product);
 });
 
+/* POST /products/images/upload (admin only - upload image to R2) */
+router.post("/products/images/upload", async (req, env) => {
+  // admin auth - uses ADMIN_SECRET
+  const ts = req.headers.get("x-timestamp");
+  const sig = req.headers.get("x-signature");
+  if (!env.ADMIN_SECRET) return new Response("admin_secret_not_configured", { status: 500, headers: corsHeaders() });
+  if (!ts || !sig) return new Response("unauthorized", { status: 401, headers: corsHeaders() });
+  
+  // For file uploads, verify signature without body (multipart boundaries make body verification unreliable)
+  // Alternative: verify with empty body for file uploads
+  const contentType = req.headers.get("content-type") || "";
+  const isMultipart = contentType.includes("multipart/form-data");
+  
+  // For multipart, verify signature with empty body; for direct binary, use body hash
+  const bodyText = isMultipart ? "" : await req.clone().text();
+  const msg = `${ts}|${req.method}|${new URL(req.url).pathname}|${bodyText}`;
+  const expected = await hmacSHA256Hex(env.ADMIN_SECRET, msg);
+  if (expected !== sig) return new Response("unauthorized", { status: 401, headers: corsHeaders() });
+
+  if (!env.PRODUCT_IMAGES) {
+    return jsonResponse({ error: "R2 bucket not configured" }, 500);
+  }
+
+  if (!env.R2_PUBLIC_URL) {
+    return jsonResponse({ error: "R2 public URL not configured" }, 500);
+  }
+
+  try {
+    // Handle multipart/form-data or direct binary upload
+    const contentType = req.headers.get("content-type") || "";
+    
+    let imageData;
+    let fileName;
+    let mimeType;
+
+    if (contentType.includes("multipart/form-data")) {
+      const formData = await req.formData();
+      const file = formData.get("file") || formData.get("image");
+      
+      if (!file || !(file instanceof File)) {
+        return jsonResponse({ error: "No file provided" }, 400);
+      }
+
+      imageData = await file.arrayBuffer();
+      fileName = file.name || `image_${crypto.randomUUID()}`;
+      mimeType = file.type || "image/jpeg";
+    } else {
+      // Direct binary upload
+      imageData = await req.arrayBuffer();
+      const contentTypeHeader = req.headers.get("content-type");
+      mimeType = contentTypeHeader || "image/jpeg";
+      
+      // Generate filename from timestamp
+      const ext = mimeType.includes("png") ? "png" : mimeType.includes("gif") ? "gif" : "jpg";
+      fileName = `image_${Date.now()}_${crypto.randomUUID().slice(0, 8)}.${ext}`;
+    }
+
+    if (!imageData || imageData.byteLength === 0) {
+      return jsonResponse({ error: "Empty file" }, 400);
+    }
+
+    // Validate file size (max 10MB)
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    if (imageData.byteLength > maxSize) {
+      return jsonResponse({ error: "File too large. Maximum size is 10MB" }, 400);
+    }
+
+    // Generate unique file path
+    const filePath = `products/${Date.now()}_${crypto.randomUUID()}_${fileName}`;
+
+    // Upload to R2
+    await env.PRODUCT_IMAGES.put(filePath, imageData, {
+      httpMetadata: {
+        contentType: mimeType,
+        cacheControl: "public, max-age=31536000", // 1 year cache
+      },
+    });
+
+    // Return public URL
+    const publicUrl = `${env.R2_PUBLIC_URL}/${filePath}`;
+
+    return jsonResponse({ 
+      url: publicUrl,
+      path: filePath,
+      size: imageData.byteLength,
+      contentType: mimeType
+    }, 201);
+  } catch (error) {
+    console.error("Image upload error:", error);
+    return jsonResponse({ error: "Upload failed", details: error.message }, 500);
+  }
+});
+
 /* POST /products (admin only - create) */
 router.post("/products", async (req, env) => {
   // admin auth - uses ADMIN_SECRET
@@ -197,6 +290,9 @@ router.post("/products", async (req, env) => {
   const productId = body.productId || `pro_${crypto.randomUUID()}`;
   const now = Math.floor(Date.now() / 1000);
 
+  // Ensure images is an array of URLs
+  const images = Array.isArray(body.images) ? body.images : (body.images ? [body.images] : []);
+
   await env.DB.prepare(`
     INSERT INTO products (product_id, sku, title, description, category, images, metadata, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -206,13 +302,82 @@ router.post("/products", async (req, env) => {
     body.title,
     body.description || null,
     body.category || null,
-    JSON.stringify(body.images || []),
+    JSON.stringify(images),
     JSON.stringify(body.metadata || {}),
     now,
     now
   ).run();
 
-  return jsonResponse({ productId }, 201);
+  return jsonResponse({ productId, images }, 201);
+});
+
+/* PUT /products/:id (admin only - update) */
+router.put("/products/:id", async (req, env) => {
+  // admin auth - uses ADMIN_SECRET
+  const ts = req.headers.get("x-timestamp");
+  const sig = req.headers.get("x-signature");
+  if (!env.ADMIN_SECRET) return new Response("admin_secret_not_configured", { status: 500, headers: corsHeaders() });
+  if (!ts || !sig) return new Response("unauthorized", { status: 401, headers: corsHeaders() });
+  const bodyText = await req.clone().text();
+  const msg = `${ts}|${req.method}|${new URL(req.url).pathname}|${bodyText}`;
+  const expected = await hmacSHA256Hex(env.ADMIN_SECRET, msg);
+  if (expected !== sig) return new Response("unauthorized", { status: 401, headers: corsHeaders() });
+
+  const { id } = req.params;
+  const body = await req.json();
+  const now = Math.floor(Date.now() / 1000);
+
+  // Check if product exists
+  const existing = await env.DB.prepare("SELECT * FROM products WHERE product_id = ?").bind(id).first();
+  if (!existing) {
+    return jsonResponse({ error: "Product not found" }, 404);
+  }
+
+  // Build update query dynamically based on provided fields
+  const updates = [];
+  const values = [];
+
+  if (body.sku !== undefined) {
+    updates.push("sku = ?");
+    values.push(body.sku);
+  }
+  if (body.title !== undefined) {
+    updates.push("title = ?");
+    values.push(body.title);
+  }
+  if (body.description !== undefined) {
+    updates.push("description = ?");
+    values.push(body.description);
+  }
+  if (body.category !== undefined) {
+    updates.push("category = ?");
+    values.push(body.category);
+  }
+  if (body.images !== undefined) {
+    const images = Array.isArray(body.images) ? body.images : (body.images ? [body.images] : []);
+    updates.push("images = ?");
+    values.push(JSON.stringify(images));
+  }
+  if (body.metadata !== undefined) {
+    updates.push("metadata = ?");
+    values.push(JSON.stringify(body.metadata));
+  }
+
+  if (updates.length === 0) {
+    return jsonResponse({ error: "No fields to update" }, 400);
+  }
+
+  updates.push("updated_at = ?");
+  values.push(now);
+  values.push(id);
+
+  await env.DB.prepare(`
+    UPDATE products 
+    SET ${updates.join(", ")}
+    WHERE product_id = ?
+  `).bind(...values).run();
+
+  return jsonResponse({ productId: id, updated: true });
 });
 
 router.all("*", () => new Response("Not Found", { status: 404, headers: corsHeaders() }));

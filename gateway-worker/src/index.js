@@ -387,21 +387,35 @@ router.put("/api/addresses/:id", async (req, env) => {
   const user = await requireAuth(req, env);
   if (user instanceof Response) return user;
 
-  const body = await req.json();
-  const res = await callService("AUTH_SERVICE", `/auth/addresses/${req.params.id}`, "PUT", body, {
-    "Authorization": req.headers.get("Authorization")
-  }, null, env, 10000);
-  return jsonRes(res.body, res.status);
+  try {
+    const body = await req.json().catch(() => null);
+    if (!body) {
+      return jsonRes({ error: "invalid_json" }, 400);
+    }
+
+    const res = await callService("AUTH_SERVICE", `/auth/addresses/${req.params.id}`, "PUT", body, {
+      "Authorization": req.headers.get("Authorization")
+    }, user, env, 10000);
+    return jsonRes(res.body, res.status);
+  } catch (error) {
+    console.error("[GATEWAY] /api/addresses/:id PUT error:", error);
+    return jsonRes({ error: "gateway_error", message: error.message }, 500);
+  }
 });
 
 router.delete("/api/addresses/:id", async (req, env) => {
   const user = await requireAuth(req, env);
   if (user instanceof Response) return user;
 
-  const res = await callService("AUTH_SERVICE", `/auth/addresses/${req.params.id}`, "DELETE", null, {
-    "Authorization": req.headers.get("Authorization")
-  }, null, env, 10000);
-  return jsonRes(res.body, res.status);
+  try {
+    const res = await callService("AUTH_SERVICE", `/auth/addresses/${req.params.id}`, "DELETE", null, {
+      "Authorization": req.headers.get("Authorization")
+    }, user, env, 10000);
+    return jsonRes(res.body, res.status);
+  } catch (error) {
+    console.error("[GATEWAY] /api/addresses/:id DELETE error:", error);
+    return jsonRes({ error: "gateway_error", message: error.message }, 500);
+  }
 });
 
 /* -------------------------------------------------------
@@ -435,21 +449,47 @@ router.post("/api/cart/:cartId/add", async (req, env) => {
 });
 
 router.post("/api/cart/:cartId/update", async (req, env) => {
-  const user = await extractUser(req, env);
-  const body = await req.json();
-  const { cartId } = req.params;
-  const stub = getCartStub(env, cartId);
-  const res = await fetchDO(stub, "/cart/update", "POST", body, cartId, user);
-  return jsonRes(res.body, res.status);
+  try {
+    const user = await extractUser(req, env);
+    const body = await req.json().catch(() => null);
+    if (!body) {
+      return jsonRes({ error: "invalid_json" }, 400);
+    }
+
+    const { cartId } = req.params;
+    const stub = getCartStub(env, cartId);
+    if (!stub) {
+      return jsonRes({ error: "cart_do_unavailable" }, 500);
+    }
+
+    const res = await fetchDO(stub, "/cart/update", "POST", body, cartId, user);
+    return jsonRes(res.body, res.status);
+  } catch (error) {
+    console.error("[GATEWAY] /api/cart/:cartId/update error:", error);
+    return jsonRes({ error: "gateway_error", message: error.message }, 500);
+  }
 });
 
 router.post("/api/cart/:cartId/remove", async (req, env) => {
-  const user = await extractUser(req, env);
-  const body = await req.json();
-  const { cartId } = req.params;
-  const stub = getCartStub(env, cartId);
-  const res = await fetchDO(stub, "/cart/remove", "POST", body, cartId, user);
-  return jsonRes(res.body, res.status);
+  try {
+    const user = await extractUser(req, env);
+    const body = await req.json().catch(() => null);
+    if (!body) {
+      return jsonRes({ error: "invalid_json" }, 400);
+    }
+
+    const { cartId } = req.params;
+    const stub = getCartStub(env, cartId);
+    if (!stub) {
+      return jsonRes({ error: "cart_do_unavailable" }, 500);
+    }
+
+    const res = await fetchDO(stub, "/cart/remove", "POST", body, cartId, user);
+    return jsonRes(res.body, res.status);
+  } catch (error) {
+    console.error("[GATEWAY] /api/cart/:cartId/remove error:", error);
+    return jsonRes({ error: "gateway_error", message: error.message }, 500);
+  }
 });
 
 router.post("/api/cart/:cartId/clear", async (req, env) => {
@@ -567,6 +607,61 @@ router.get("/api/orders/:orderId", async (req, env) => {
 /* -------------------------------------------------------
    ADMIN ROUTES
 ------------------------------------------------------- */
+router.post("/api/admin/products/images/upload", async (req, env) => {
+  const user = await requireAdmin(req, env);
+  if (user instanceof Response) return user;
+
+  try {
+    // For file uploads, we need to forward the request directly
+    const contentType = req.headers.get("content-type") || "";
+    const isMultipart = contentType.includes("multipart/form-data");
+    
+    // Get the raw body for signature generation
+    // For multipart, use empty body for signature
+    const bodyText = isMultipart ? "" : await req.clone().arrayBuffer().then(ab => new TextDecoder().decode(ab));
+    
+    const path = "/products/images/upload";
+    const headers = await signedHeadersFor(env.ADMIN_SECRET || env.INTERNAL_SECRET, "POST", path, bodyText);
+    
+    // Forward the request with the file
+    const serviceBinding = env.PRODUCTS_SERVICE;
+    const serviceUrl = env.PRODUCTS_SERVICE_URL;
+    
+    // Build headers object
+    const forwardedHeaders = new Headers(req.headers);
+    Object.entries(headers).forEach(([key, value]) => {
+      forwardedHeaders.set(key, value);
+    });
+    
+    let response;
+    if (serviceBinding && typeof serviceBinding.fetch === 'function') {
+      // Use service binding
+      const forwardedReq = new Request(`https://internal${path}`, {
+        method: req.method,
+        headers: forwardedHeaders,
+        body: req.body
+      });
+      response = await serviceBinding.fetch(forwardedReq);
+    } else if (serviceUrl && serviceUrl.startsWith('http')) {
+      // Use URL
+      const fullUrl = serviceUrl.replace(/\/$/, "") + path;
+      response = await fetch(fullUrl, {
+        method: req.method,
+        headers: forwardedHeaders,
+        body: req.body
+      });
+    } else {
+      return jsonRes({ error: "service_not_configured" }, 502);
+    }
+    
+    const responseBody = await response.json().catch(() => ({ error: "Invalid response" }));
+    return jsonRes(responseBody, response.status);
+  } catch (error) {
+    console.error("[GATEWAY] Image upload error:", error);
+    return jsonRes({ error: "gateway_error", message: error.message }, 500);
+  }
+});
+
 router.post("/api/admin/products", async (req, env) => {
   const user = await requireAdmin(req, env);
   if (user instanceof Response) return user;
