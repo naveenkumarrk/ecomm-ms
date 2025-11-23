@@ -37,8 +37,8 @@ describe('Cart Worker Integration', () => {
 								items: [{ productId: 'pro_1', qty: 1 }],
 							},
 						}),
-						{ status: 200 }
-					)
+						{ status: 200 },
+					),
 				),
 			};
 
@@ -75,8 +75,8 @@ describe('Cart Worker Integration', () => {
 							items: [],
 							summary: { subtotal: 0, total: 0 },
 						}),
-						{ status: 200 }
-					)
+						{ status: 200 },
+					),
 				),
 			};
 
@@ -98,4 +98,3 @@ describe('Cart Worker Integration', () => {
 		});
 	});
 });
-

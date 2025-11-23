@@ -1,9 +1,9 @@
 /**
  * Test setup file - runs before all tests
  */
-import chai from "chai";
-import sinonChai from "sinon-chai";
-import sinon from "sinon";
+import chai from 'chai';
+import sinonChai from 'sinon-chai';
+import sinon from 'sinon';
 
 // Setup chai plugins
 chai.use(sinonChai);

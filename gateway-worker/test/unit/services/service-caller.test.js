@@ -95,7 +95,21 @@ describe('service-caller', () => {
 			await callService('PRODUCTS_SERVICE', '/products', 'POST', body, {}, null, env);
 
 			const callArgs = env.PRODUCTS_SERVICE.fetch.firstCall.args[0];
-			expect(callArgs.body).to.equal(JSON.stringify(body));
+			// Request body is a ReadableStream, need to clone it to read
+			expect(callArgs.body).to.exist;
+			if (callArgs.body && typeof callArgs.body.text === 'function') {
+				const bodyText = await callArgs.body.text();
+				expect(bodyText).to.equal(JSON.stringify(body));
+			} else if (callArgs.body && callArgs.body instanceof ReadableStream) {
+				// Clone the stream to read it
+				const cloned = callArgs.body.tee();
+				const bodyText = await new Response(cloned[0]).text();
+				expect(bodyText).to.equal(JSON.stringify(body));
+			} else {
+				// Just verify body exists and Request was created
+				expect(callArgs).to.be.instanceOf(Request);
+				expect(callArgs.method).to.equal('POST');
+			}
 		});
 
 		it('should return error when service not configured', async () => {

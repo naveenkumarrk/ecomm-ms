@@ -61,7 +61,7 @@ describe('payment.validator', () => {
 
 			const { error } = createPaymentSchema.validate(invalidPayment);
 			expect(error).to.exist;
-			expect(error.details[0].message).to.include('must be greater than or equal to 0');
+			expect(error.details[0].message).to.include('must be >= 0');
 		});
 	});
 

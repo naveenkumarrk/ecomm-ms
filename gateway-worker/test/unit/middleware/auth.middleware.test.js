@@ -3,15 +3,31 @@
  */
 import { describe, it, beforeEach, afterEach } from 'mocha';
 import { extractUser, requireAuth, requireAdmin } from '../../../src/middleware/auth.middleware.js';
-import * as jwtHelper from '../../../src/helpers/jwt.js';
 import sinon from 'sinon';
+
+// Helper to create a valid JWT token for testing
+async function createTestJWT(payload, secretBase64) {
+	const header = { alg: 'HS256', typ: 'JWT' };
+	const headerB64 = btoa(JSON.stringify(header)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+	const payloadB64 = btoa(JSON.stringify(payload)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+
+	const rawKey = Uint8Array.from(atob(secretBase64), (c) => c.charCodeAt(0));
+	const cryptoKey = await crypto.subtle.importKey('raw', rawKey, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+	const signature = await crypto.subtle.sign('HMAC', cryptoKey, new TextEncoder().encode(`${headerB64}.${payloadB64}`));
+	const sigB64 = btoa(String.fromCharCode(...new Uint8Array(signature)))
+		.replace(/=/g, '')
+		.replace(/\+/g, '-')
+		.replace(/\//g, '_');
+
+	return `${headerB64}.${payloadB64}.${sigB64}`;
+}
 
 describe('auth.middleware', () => {
 	let env, request;
 
 	beforeEach(() => {
 		env = {
-			JWT_SECRET: 'dGVzdC1zZWNyZXQ=',
+			JWT_SECRET: 'dGVzdC1zZWNyZXQ=', // base64 encoded 'test-secret'
 		};
 
 		request = {
@@ -27,20 +43,18 @@ describe('auth.middleware', () => {
 
 	describe('extractUser', () => {
 		it('should extract user from valid JWT token', async () => {
-			const mockUser = {
+			const payload = {
 				sub: 'user123',
 				role: 'user',
 				exp: Math.floor(Date.now() / 1000) + 3600,
 			};
 
-			request.headers.get.withArgs('Authorization').returns('Bearer valid-token');
-
-			const verifyJWTStub = sinon.stub(jwtHelper, 'verifyJWT').resolves(mockUser);
+			const token = await createTestJWT(payload, env.JWT_SECRET);
+			request.headers.get.withArgs('Authorization').returns(`Bearer ${token}`);
 
 			const result = await extractUser(request, env);
 
-			expect(verifyJWTStub).to.have.been.calledOnceWith('valid-token', env.JWT_SECRET);
-			expect(result).to.deep.equal(mockUser);
+			expect(result).to.deep.equal(payload);
 		});
 
 		it('should return null when no Authorization header', async () => {
@@ -62,37 +76,26 @@ describe('auth.middleware', () => {
 		it('should return null when JWT verification fails', async () => {
 			request.headers.get.withArgs('Authorization').returns('Bearer invalid-token');
 
-			const verifyJWTStub = sinon.stub(jwtHelper, 'verifyJWT').resolves(null);
-
 			const result = await extractUser(request, env);
 
 			expect(result).to.be.null;
-			expect(verifyJWTStub).to.have.been.calledOnce;
 		});
 	});
 
 	describe('requireAuth', () => {
 		it('should return user when token is valid', async () => {
-			const mockUser = {
+			const payload = {
 				sub: 'user123',
 				role: 'user',
 				exp: Math.floor(Date.now() / 1000) + 3600,
 			};
 
-			const extractUserStub = sinon.stub().resolves(mockUser);
-			sinon.stub(jwtHelper, 'verifyJWT').resolves(mockUser);
-			request.headers.get.withArgs('Authorization').returns('Bearer valid-token');
-
-			// Mock extractUser by stubbing the module
-			const authMiddleware = await import('../../../src/middleware/auth.middleware.js');
-			const originalExtract = authMiddleware.extractUser;
-			authMiddleware.extractUser = extractUserStub;
+			const token = await createTestJWT(payload, env.JWT_SECRET);
+			request.headers.get.withArgs('Authorization').returns(`Bearer ${token}`);
 
 			const result = await requireAuth(request, env);
 
-			expect(result).to.deep.equal(mockUser);
-
-			authMiddleware.extractUser = originalExtract;
+			expect(result).to.deep.equal(payload);
 		});
 
 		it('should return error response when token is invalid', async () => {
@@ -109,29 +112,29 @@ describe('auth.middleware', () => {
 
 	describe('requireAdmin', () => {
 		it('should return user when user is admin', async () => {
-			const mockAdmin = {
+			const payload = {
 				sub: 'admin123',
 				role: 'admin',
 				exp: Math.floor(Date.now() / 1000) + 3600,
 			};
 
-			request.headers.get.withArgs('Authorization').returns('Bearer admin-token');
-			const verifyJWTStub = sinon.stub(jwtHelper, 'verifyJWT').resolves(mockAdmin);
+			const token = await createTestJWT(payload, env.JWT_SECRET);
+			request.headers.get.withArgs('Authorization').returns(`Bearer ${token}`);
 
 			const result = await requireAdmin(request, env);
 
-			expect(result).to.deep.equal(mockAdmin);
+			expect(result).to.deep.equal(payload);
 		});
 
 		it('should return error response when user is not admin', async () => {
-			const mockUser = {
+			const payload = {
 				sub: 'user123',
 				role: 'user',
 				exp: Math.floor(Date.now() / 1000) + 3600,
 			};
 
-			request.headers.get.withArgs('Authorization').returns('Bearer user-token');
-			const verifyJWTStub = sinon.stub(jwtHelper, 'verifyJWT').resolves(mockUser);
+			const token = await createTestJWT(payload, env.JWT_SECRET);
+			request.headers.get.withArgs('Authorization').returns(`Bearer ${token}`);
 
 			const result = await requireAdmin(request, env);
 

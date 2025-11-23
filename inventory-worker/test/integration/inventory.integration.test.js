@@ -101,4 +101,3 @@ describe('Inventory Worker Integration', () => {
 		});
 	});
 });
-

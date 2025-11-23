@@ -3,7 +3,6 @@
  */
 import { describe, it, beforeEach, afterEach } from 'mocha';
 import { transformProductRow, enrichProductWithStock, enrichProductsWithStock } from '../../../src/services/product.service.js';
-import * as inventoryService from '../../../src/services/inventory.service.js';
 import sinon from 'sinon';
 
 describe('product.service', () => {
@@ -77,10 +76,10 @@ describe('product.service', () => {
 	});
 
 	describe('enrichProductWithStock', () => {
-		let getProductStockStub;
+		let fetchStub;
 
 		beforeEach(() => {
-			getProductStockStub = sinon.stub(inventoryService, 'getProductStock');
+			fetchStub = sinon.stub(global, 'fetch');
 		});
 
 		afterEach(() => {
@@ -100,14 +99,22 @@ describe('product.service', () => {
 				updated_at: 1234567890,
 			};
 
-			const mockEnv = {};
-			getProductStockStub.resolves({ stock: 50, reserved: 5 });
+			const mockEnv = {
+				INVENTORY_SERVICE_URL: 'https://inventory.example.com',
+				INTERNAL_SECRET: 'test-secret',
+			};
+
+			fetchStub.resolves({
+				ok: true,
+				status: 200,
+				text: sinon.stub().resolves('{"stock": 50, "reserved": 5}'),
+			});
 
 			const result = await enrichProductWithStock(mockEnv, row);
 
-			expect(getProductStockStub).to.have.been.calledOnceWith(mockEnv, 'pro_123');
 			expect(result).to.have.property('stock', 50);
 			expect(result).to.have.property('reserved', 5);
+			expect(fetchStub).to.have.been.calledOnce;
 		});
 
 		it('should handle inventory service errors gracefully', async () => {
@@ -123,8 +130,12 @@ describe('product.service', () => {
 				updated_at: 1234567890,
 			};
 
-			const mockEnv = {};
-			getProductStockStub.rejects(new Error('Inventory service unavailable'));
+			const mockEnv = {
+				INVENTORY_SERVICE_URL: 'https://inventory.example.com',
+				INTERNAL_SECRET: 'test-secret',
+			};
+
+			fetchStub.rejects(new Error('Inventory service unavailable'));
 
 			try {
 				await enrichProductWithStock(mockEnv, row);
@@ -133,13 +144,65 @@ describe('product.service', () => {
 				expect(error).to.be.instanceOf(Error);
 			}
 		});
+
+		it('should return zero stock when inventory service not configured', async () => {
+			const row = {
+				product_id: 'pro_123',
+				sku: 'SKU-001',
+				title: 'Test Product',
+				description: 'Test',
+				category: 'Test',
+				images: '[]',
+				metadata: '{"price": 100}',
+				created_at: 1234567890,
+				updated_at: 1234567890,
+			};
+
+			const mockEnv = {}; // No INVENTORY_SERVICE_URL or INTERNAL_SECRET
+
+			const result = await enrichProductWithStock(mockEnv, row);
+
+			expect(result).to.have.property('stock', 0);
+			expect(result).to.have.property('reserved', 0);
+			expect(fetchStub).to.not.have.been.called;
+		});
+
+		it('should return zero stock when inventory service returns error response', async () => {
+			const row = {
+				product_id: 'pro_123',
+				sku: 'SKU-001',
+				title: 'Test Product',
+				description: 'Test',
+				category: 'Test',
+				images: '[]',
+				metadata: '{"price": 100}',
+				created_at: 1234567890,
+				updated_at: 1234567890,
+			};
+
+			const mockEnv = {
+				INVENTORY_SERVICE_URL: 'https://inventory.example.com',
+				INTERNAL_SECRET: 'test-secret',
+			};
+
+			fetchStub.resolves({
+				ok: false,
+				status: 500,
+				text: sinon.stub().resolves('{"error": "Internal error"}'),
+			});
+
+			const result = await enrichProductWithStock(mockEnv, row);
+
+			expect(result).to.have.property('stock', 0);
+			expect(result).to.have.property('reserved', 0);
+		});
 	});
 
 	describe('enrichProductsWithStock', () => {
-		let getProductStockStub;
+		let fetchStub;
 
 		beforeEach(() => {
-			getProductStockStub = sinon.stub(inventoryService, 'getProductStock');
+			fetchStub = sinon.stub(global, 'fetch');
 		});
 
 		afterEach(() => {
@@ -172,16 +235,28 @@ describe('product.service', () => {
 				},
 			];
 
-			const mockEnv = {};
-			getProductStockStub.onFirstCall().resolves({ stock: 50, reserved: 5 });
-			getProductStockStub.onSecondCall().resolves({ stock: 100, reserved: 10 });
+			const mockEnv = {
+				INVENTORY_SERVICE_URL: 'https://inventory.example.com',
+				INTERNAL_SECRET: 'test-secret',
+			};
+
+			fetchStub.onFirstCall().resolves({
+				ok: true,
+				status: 200,
+				text: sinon.stub().resolves('{"stock": 50, "reserved": 5}'),
+			});
+			fetchStub.onSecondCall().resolves({
+				ok: true,
+				status: 200,
+				text: sinon.stub().resolves('{"stock": 100, "reserved": 10}'),
+			});
 
 			const results = await enrichProductsWithStock(mockEnv, rows);
 
 			expect(results).to.be.an('array').with.length(2);
 			expect(results[0]).to.have.property('stock', 50);
 			expect(results[1]).to.have.property('stock', 100);
-			expect(getProductStockStub).to.have.been.calledTwice;
+			expect(fetchStub).to.have.been.calledTwice;
 		});
 	});
 });

@@ -147,7 +147,7 @@ describe('db.queries', () => {
 	describe('updateProduct', () => {
 		it('should update product with provided fields', async () => {
 			const updates = ['title = ?', 'description = ?'];
-			const values = ['New Title', 'New Description'];
+			const values = ['New Title', 'New Description', 'pro_123']; // productId must be included in values
 
 			const stmt = {
 				bind: sinon.stub().returnsThis(),

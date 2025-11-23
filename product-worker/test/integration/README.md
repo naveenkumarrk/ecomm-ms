@@ -1,6 +1,7 @@
 # Integration Tests
 
 Integration tests verify the full request/response cycle through the worker, including:
+
 - Route handling
 - Middleware execution
 - Service interactions
@@ -16,6 +17,7 @@ npm run test:integration
 ## Test Structure
 
 Integration tests use real request/response objects and test the complete flow:
+
 - HTTP request creation
 - Worker handler execution
 - Response validation
@@ -36,4 +38,3 @@ Integration tests use real request/response objects and test the complete flow:
 3. Call worker handler
 4. Verify response status and data
 5. Verify service interactions
-

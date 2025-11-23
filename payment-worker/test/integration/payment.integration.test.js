@@ -44,13 +44,16 @@ describe('Payment Worker Integration', () => {
 	describe('POST /payment/paypal/create', () => {
 		it('should create PayPal payment order', async () => {
 			// Mock PayPal token
-			global.fetch = sinon.stub().onFirstCall().resolves({
-				ok: true,
-				json: sinon.stub().resolves({
-					access_token: 'test_token',
-					expires_in: 3600,
-				}),
-			});
+			global.fetch = sinon
+				.stub()
+				.onFirstCall()
+				.resolves({
+					ok: true,
+					json: sinon.stub().resolves({
+						access_token: 'test_token',
+						expires_in: 3600,
+					}),
+				});
 
 			// Mock PayPal order creation
 			global.fetch.onSecondCall().resolves({
@@ -93,17 +96,20 @@ describe('Payment Worker Integration', () => {
 					userId: 'user_123',
 					amount: 99.99,
 					currency: 'USD',
-				})
+				}),
 			);
 
 			// Mock PayPal capture
-			global.fetch = sinon.stub().onFirstCall().resolves({
-				ok: true,
-				json: sinon.stub().resolves({
-					access_token: 'test_token',
-					expires_in: 3600,
-				}),
-			});
+			global.fetch = sinon
+				.stub()
+				.onFirstCall()
+				.resolves({
+					ok: true,
+					json: sinon.stub().resolves({
+						access_token: 'test_token',
+						expires_in: 3600,
+					}),
+				});
 
 			global.fetch.onSecondCall().resolves({
 				ok: true,
@@ -158,4 +164,3 @@ describe('Payment Worker Integration', () => {
 		});
 	});
 });
-

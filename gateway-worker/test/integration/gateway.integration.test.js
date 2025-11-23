@@ -109,4 +109,3 @@ describe('Gateway Worker Integration', () => {
 		});
 	});
 });
-

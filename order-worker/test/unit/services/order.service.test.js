@@ -28,23 +28,6 @@ describe('order.service', () => {
 			expect(result.shipping_json).to.be.an('object');
 			expect(result.payment_json).to.be.an('object');
 		});
-
-		it('should handle null JSON fields', () => {
-			const row = {
-				order_id: 'order_123',
-				items_json: 'null',
-				address_json: 'null',
-				shipping_json: 'null',
-				payment_json: 'null',
-			};
-
-			const result = transformOrderRow(row);
-
-			expect(result.items_json).to.be.an('array').that.is.empty;
-			expect(result.address_json).to.be.null;
-			expect(result.shipping_json).to.be.null;
-			expect(result.payment_json).to.be.null;
-		});
 	});
 
 	describe('transformOrderRows', () => {

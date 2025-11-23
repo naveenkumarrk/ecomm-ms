@@ -121,7 +121,7 @@ export async function updateItemHandler(req, cart, state, env) {
 	}
 
 	const { productId, variantId, quantity } = validation.value;
-	
+
 	// Normalize variantId: treat null, undefined, and empty string as the same
 	const normalizedVariantId = variantId || null;
 
@@ -132,13 +132,13 @@ export async function updateItemHandler(req, cart, state, env) {
 	});
 
 	if (index < 0) {
-		return { 
-			error: 'item_not_found', 
-			details: { 
-				productId, 
+		return {
+			error: 'item_not_found',
+			details: {
+				productId,
 				variantId: normalizedVariantId,
-				availableItems: cart.items.map(i => ({ productId: i.productId, variantId: i.variantId || null }))
-			}
+				availableItems: cart.items.map((i) => ({ productId: i.productId, variantId: i.variantId || null })),
+			},
 		};
 	}
 
@@ -235,35 +235,35 @@ export async function getShippingOptionsHandler(req, cart, state, env) {
 
 	// Get shipping options from fulfillment service
 	// Transform items to match fulfillment service schema (only allowed fields)
-	const transformedItems = cart.items.map(item => {
+	const transformedItems = cart.items.map((item) => {
 		const transformed = {
 			productId: item.productId,
 			qty: item.qty,
 		};
-		
+
 		// Only include variantId if it exists
 		if (item.variantId) {
 			transformed.variantId = item.variantId;
 		}
-		
+
 		// Only include unitPrice if it exists
 		if (item.unitPrice !== undefined) {
 			transformed.unitPrice = item.unitPrice;
 		}
-		
+
 		// Only include weight in attributes if it exists
 		if (item.attributes?.weight !== undefined) {
 			transformed.attributes = { weight: item.attributes.weight };
 		}
-		
+
 		// Include weight at top level if it exists (fulfillment service accepts both)
 		if (item.weight !== undefined) {
 			transformed.weight = item.weight;
 		}
-		
+
 		return transformed;
 	});
-	
+
 	// Transform address to match fulfillment service schema (only pincode/postal/zip)
 	const transformedAddress = {};
 	if (address) {
@@ -271,7 +271,7 @@ export async function getShippingOptionsHandler(req, cart, state, env) {
 		if (address.postal) transformedAddress.postal = address.postal;
 		if (address.zip) transformedAddress.zip = address.zip;
 	}
-	
+
 	const payload = {
 		items: transformedItems,
 		address: Object.keys(transformedAddress).length > 0 ? transformedAddress : undefined,
@@ -294,21 +294,21 @@ export async function getShippingOptionsHandler(req, cart, state, env) {
 
 	if (!res.ok) {
 		console.error('[CART] Fulfillment service error:', res.status, res.body);
-		return { 
-			error: 'fulfillment_error', 
-			details: res.body, 
+		return {
+			error: 'fulfillment_error',
+			details: res.body,
 			status: res.status || 502,
-			message: typeof res.body === 'object' && res.body.error ? res.body.error : 'Failed to fetch shipping options'
+			message: typeof res.body === 'object' && res.body.error ? res.body.error : 'Failed to fetch shipping options',
 		};
 	}
 
 	// Validate response structure
 	if (!res.body || !res.body.shippingOptions) {
 		console.error('[CART] Invalid fulfillment response structure:', res.body);
-		return { 
-			error: 'fulfillment_error', 
+		return {
+			error: 'fulfillment_error',
 			details: 'Invalid response structure from fulfillment service',
-			status: 502 
+			status: 502,
 		};
 	}
 
@@ -332,7 +332,7 @@ export async function selectShippingHandler(req, cart, state, env) {
 		// Reload cart from storage first to ensure we have latest state
 		const storedCart = await state.storage.get('cart');
 		if (storedCart) cart = storedCart;
-		
+
 		// If still no options, fetch them
 		if (!cart.shippingOptions || cart.shippingOptions.length === 0) {
 			const optionsResult = await getShippingOptionsHandler(req, cart, state, env);
@@ -347,7 +347,10 @@ export async function selectShippingHandler(req, cart, state, env) {
 
 	const option = (cart.shippingOptions || []).find((o) => o.methodId === methodId);
 	if (!option) {
-		return { error: 'invalid_shipping_method', details: { methodId, availableOptions: (cart.shippingOptions || []).map(o => o.methodId) } };
+		return {
+			error: 'invalid_shipping_method',
+			details: { methodId, availableOptions: (cart.shippingOptions || []).map((o) => o.methodId) },
+		};
 	}
 
 	cart.shippingMethod = option;
@@ -404,46 +407,46 @@ export async function checkoutStartHandler(req, cart, state, env) {
 
 	// Detailed validation with helpful error messages
 	if (!cart.items || !cart.items.length) {
-		return { 
-			error: 'cart_empty', 
+		return {
+			error: 'cart_empty',
 			message: 'Cart is empty. Please add items before checkout.',
-			details: { cartId: cart.cartId, itemCount: cart.items?.length || 0 }
+			details: { cartId: cart.cartId, itemCount: cart.items?.length || 0 },
 		};
 	}
 	if (!cart.addressId) {
-		return { 
-			error: 'address_required', 
+		return {
+			error: 'address_required',
 			message: 'Shipping address is required. Please select an address.',
-			details: { cartId: cart.cartId, hasAddress: !!cart.addressId }
+			details: { cartId: cart.cartId, hasAddress: !!cart.addressId },
 		};
 	}
 	if (!cart.shippingMethod) {
-		return { 
-			error: 'shipping_required', 
+		return {
+			error: 'shipping_required',
 			message: 'Shipping method is required. Please select a shipping option.',
-			details: { 
-				cartId: cart.cartId, 
+			details: {
+				cartId: cart.cartId,
 				hasShippingMethod: !!cart.shippingMethod,
-				shippingOptionsCount: cart.shippingOptions?.length || 0
-			}
+				shippingOptionsCount: cart.shippingOptions?.length || 0,
+			},
 		};
 	}
 
 	const userId = req.headers.get('x-user-id') || req.headers.get('x-userid') || null;
 	if (!userId) {
-		return { 
-			error: 'authentication_required', 
+		return {
+			error: 'authentication_required',
 			message: 'User authentication is required.',
-			status: 401 
+			status: 401,
 		};
 	}
 
 	const authToken = req.headers.get('Authorization');
 	if (!authToken) {
-		return { 
-			error: 'authorization_required', 
+		return {
+			error: 'authorization_required',
 			message: 'Authorization token is required.',
-			status: 401 
+			status: 401,
 		};
 	}
 
@@ -452,10 +455,10 @@ export async function checkoutStartHandler(req, cart, state, env) {
 	const address = addresses.find((a) => a.addressId === cart.addressId);
 
 	if (!address) {
-		return { 
-			error: 'address_not_found', 
+		return {
+			error: 'address_not_found',
 			message: `Address with ID ${cart.addressId} not found for this user.`,
-			details: { addressId: cart.addressId, availableAddresses: addresses.length }
+			details: { addressId: cart.addressId, availableAddresses: addresses.length },
 		};
 	}
 
@@ -466,7 +469,7 @@ export async function checkoutStartHandler(req, cart, state, env) {
 
 	// Reserve inventory
 	// Map cart items to inventory service format (only productId, qty, variantId)
-	const inventoryItems = cart.items.map(item => ({
+	const inventoryItems = cart.items.map((item) => ({
 		productId: item.productId,
 		qty: item.qty,
 		variantId: item.variantId || null,

@@ -3,7 +3,6 @@
  */
 import { describe, it, beforeEach, afterEach } from 'mocha';
 import { handleSignup, handleLogin, handleAdminSignup } from '../../../src/handlers/auth.handler.js';
-import * as authService from '../../../src/services/auth.service.js';
 import sinon from 'sinon';
 
 describe('auth.handler', () => {
@@ -20,6 +19,7 @@ describe('auth.handler', () => {
 			},
 			JWT_SECRET: btoa('test-secret'),
 			ACCESS_TOKEN_TTL: 3600,
+			ADMIN_SECRET: 'adminsecret',
 		};
 
 		request = {
@@ -42,18 +42,31 @@ describe('auth.handler', () => {
 				name: 'Test User',
 			});
 
-			const createUserStub = sinon.stub(authService, 'createUser').resolves({
-				userId: 'user123',
-				email: 'test@example.com',
-				role: 'user',
+			// Mock DB operations
+			env.DB.prepare = sinon.stub().callsFake((query) => {
+				const stmt = {
+					bind: sinon.stub().returnsThis(),
+					first: sinon.stub(),
+					run: sinon.stub().resolves({ success: true }),
+				};
+
+				if (query.includes('SELECT 1 FROM users WHERE email')) {
+					// CHECK_EXISTS
+					stmt.first.resolves(null);
+				} else if (query.includes('INSERT INTO users')) {
+					// CREATE
+					stmt.run.resolves({ success: true });
+				}
+
+				return stmt;
 			});
 
 			const response = await handleSignup(request, env);
 			const data = await response.json();
 
 			expect(response.status).to.equal(201);
-			expect(data).to.have.property('userId', 'user123');
-			expect(createUserStub).to.have.been.calledOnce;
+			expect(data).to.have.property('userId');
+			expect(data).to.have.property('email', 'test@example.com');
 		});
 
 		it('should return 400 for validation errors', async () => {
@@ -69,6 +82,46 @@ describe('auth.handler', () => {
 			expect(data).to.have.property('error', 'validation_error');
 		});
 
+		it('should handle internal errors', async () => {
+			request.json.resolves({
+				email: 'test@example.com',
+				password: 'password123',
+				name: 'Test User',
+			});
+
+			env.DB.prepare = sinon.stub().callsFake((query) => {
+				const stmt = {
+					bind: sinon.stub().returnsThis(),
+					first: sinon.stub(),
+					run: sinon.stub(),
+				};
+
+				if (query.includes('SELECT 1 FROM users WHERE email')) {
+					stmt.first.resolves(null);
+				} else if (query.includes('INSERT INTO users')) {
+					stmt.run.rejects(new Error('Database error'));
+				}
+
+				return stmt;
+			});
+
+			const response = await handleSignup(request, env);
+			const data = await response.json();
+
+			expect(response.status).to.equal(500);
+			expect(data).to.have.property('error', 'internal_error');
+		});
+
+		it('should handle invalid JSON', async () => {
+			request.json.rejects(new Error('Invalid JSON'));
+
+			const response = await handleSignup(request, env);
+			const data = await response.json();
+
+			expect(response.status).to.equal(400);
+			expect(data).to.have.property('error', 'invalid_json');
+		});
+
 		it('should return 409 for existing email', async () => {
 			request.json.resolves({
 				email: 'existing@example.com',
@@ -76,7 +129,21 @@ describe('auth.handler', () => {
 				name: 'Test User',
 			});
 
-			const createUserStub = sinon.stub(authService, 'createUser').rejects(new Error('email_exists'));
+			// Mock DB - user already exists
+			env.DB.prepare = sinon.stub().callsFake((query) => {
+				const stmt = {
+					bind: sinon.stub().returnsThis(),
+					first: sinon.stub(),
+					run: sinon.stub(),
+				};
+
+				if (query.includes('SELECT 1 FROM users WHERE email')) {
+					// CHECK_EXISTS - user exists
+					stmt.first.resolves({ 1: 1 });
+				}
+
+				return stmt;
+			});
 
 			const response = await handleSignup(request, env);
 			const data = await response.json();
@@ -93,17 +160,45 @@ describe('auth.handler', () => {
 				password: 'password123',
 			});
 
-			const loginUserStub = sinon.stub(authService, 'loginUser').resolves({
-				accessToken: 'token123',
-				expiresIn: 3600,
+			// Mock user data with hashed password
+			// We need to create a real password hash for verification
+			const { hashPassword } = await import('../../../src/helpers/password.js');
+			const hashedPassword = await hashPassword('password123');
+
+			const userData = {
+				userId: 'user123',
+				email: 'test@example.com',
+				role: 'user',
+				data: JSON.stringify({
+					auth: { passwordHash: hashedPassword },
+				}),
+			};
+
+			// Mock DB operations
+			env.DB.prepare = sinon.stub().callsFake((query) => {
+				const stmt = {
+					bind: sinon.stub().returnsThis(),
+					first: sinon.stub(),
+					run: sinon.stub().resolves({ success: true }),
+				};
+
+				if (query.includes('SELECT * FROM users WHERE email')) {
+					// FIND_BY_EMAIL
+					stmt.first.resolves(userData);
+				} else if (query.includes('INSERT INTO sessions')) {
+					// CREATE session
+					stmt.run.resolves({ success: true });
+				}
+
+				return stmt;
 			});
 
 			const response = await handleLogin(request, env);
 			const data = await response.json();
 
 			expect(response.status).to.equal(200);
-			expect(data).to.have.property('accessToken', 'token123');
-			expect(loginUserStub).to.have.been.calledOnce;
+			expect(data).to.have.property('accessToken');
+			expect(data).to.have.property('expiresIn', 3600);
 		});
 
 		it('should return 401 for invalid credentials', async () => {
@@ -112,13 +207,93 @@ describe('auth.handler', () => {
 				password: 'wrongpassword',
 			});
 
-			const loginUserStub = sinon.stub(authService, 'loginUser').rejects(new Error('invalid_credentials'));
+			// Mock user data with correct password hash
+			const { hashPassword } = await import('../../../src/helpers/password.js');
+			const hashedPassword = await hashPassword('correctpassword');
+
+			const userData = {
+				userId: 'user123',
+				email: 'test@example.com',
+				role: 'user',
+				data: JSON.stringify({
+					auth: { passwordHash: hashedPassword },
+				}),
+			};
+
+			// Mock DB - user exists but password is wrong
+			env.DB.prepare = sinon.stub().callsFake((query) => {
+				const stmt = {
+					bind: sinon.stub().returnsThis(),
+					first: sinon.stub(),
+					run: sinon.stub(),
+				};
+
+				if (query.includes('SELECT * FROM users WHERE email')) {
+					// FIND_BY_EMAIL
+					stmt.first.resolves(userData);
+				}
+
+				return stmt;
+			});
 
 			const response = await handleLogin(request, env);
 			const data = await response.json();
 
 			expect(response.status).to.equal(401);
 			expect(data).to.have.property('error', 'invalid_credentials');
+		});
+
+		it('should return 401 when user not found', async () => {
+			request.json.resolves({
+				email: 'notfound@example.com',
+				password: 'password123',
+			});
+
+			// Mock DB - user not found
+			env.DB.prepare = sinon.stub().callsFake((query) => {
+				const stmt = {
+					bind: sinon.stub().returnsThis(),
+					first: sinon.stub(),
+				};
+
+				if (query.includes('SELECT * FROM users WHERE email')) {
+					stmt.first.resolves(null);
+				}
+
+				return stmt;
+			});
+
+			const response = await handleLogin(request, env);
+			const data = await response.json();
+
+			expect(response.status).to.equal(401);
+			expect(data).to.have.property('error', 'invalid_credentials');
+		});
+
+		it('should handle internal errors during login', async () => {
+			request.json.resolves({
+				email: 'test@example.com',
+				password: 'password123',
+			});
+
+			env.DB.prepare = sinon.stub().callsFake((query) => {
+				const stmt = {
+					bind: sinon.stub().returnsThis(),
+					first: sinon.stub(),
+				};
+
+				if (query.includes('SELECT * FROM users WHERE email')) {
+					stmt.first.rejects(new Error('Database error'));
+				}
+
+				return stmt;
+			});
+
+			const response = await handleLogin(request, env);
+			const data = await response.json();
+
+			expect(response.status).to.equal(500);
+			expect(data).to.have.property('error', 'internal_error');
 		});
 	});
 
@@ -132,10 +307,23 @@ describe('auth.handler', () => {
 
 			request.headers.get.withArgs('x-admin-secret').returns('adminsecret');
 
-			const createUserStub = sinon.stub(authService, 'createUser').resolves({
-				userId: 'admin123',
-				email: 'admin@example.com',
-				role: 'admin',
+			// Mock DB operations
+			env.DB.prepare = sinon.stub().callsFake((query) => {
+				const stmt = {
+					bind: sinon.stub().returnsThis(),
+					first: sinon.stub(),
+					run: sinon.stub().resolves({ success: true }),
+				};
+
+				if (query.includes('SELECT 1 FROM users WHERE email')) {
+					// CHECK_EXISTS - user doesn't exist
+					stmt.first.resolves(null);
+				} else if (query.includes('INSERT INTO users')) {
+					// CREATE admin user
+					stmt.run.resolves({ success: true });
+				}
+
+				return stmt;
 			});
 
 			const response = await handleAdminSignup(request, env);
@@ -159,6 +347,79 @@ describe('auth.handler', () => {
 
 			expect(response.status).to.equal(401);
 			expect(data).to.have.property('error', 'unauthorized');
+		});
+
+		it('should use adminSecret from body if not in headers', async () => {
+			request.json.resolves({
+				email: 'admin@example.com',
+				password: 'password123',
+				name: 'Admin User',
+				adminSecret: 'adminsecret',
+			});
+
+			request.headers.get.withArgs('x-admin-secret').returns(null);
+
+			env.DB.prepare = sinon.stub().callsFake((query) => {
+				const stmt = {
+					bind: sinon.stub().returnsThis(),
+					first: sinon.stub(),
+					run: sinon.stub().resolves({ success: true }),
+				};
+
+				if (query.includes('SELECT 1 FROM users WHERE email')) {
+					stmt.first.resolves(null);
+				} else if (query.includes('INSERT INTO users')) {
+					stmt.run.resolves({ success: true });
+				}
+
+				return stmt;
+			});
+
+			const response = await handleAdminSignup(request, env);
+			const data = await response.json();
+
+			expect(response.status).to.equal(201);
+			expect(data).to.have.property('role', 'admin');
+		});
+	});
+
+	describe('handleLogout', () => {
+		it('should logout user successfully', async () => {
+			const user = {
+				sub: 'user123',
+				sid: 'sess_123',
+			};
+
+			env.DB.prepare = sinon.stub().callsFake((query) => {
+				const stmt = {
+					bind: sinon.stub().returnsThis(),
+					run: sinon.stub().resolves({ success: true }),
+				};
+
+				if (query.includes('UPDATE sessions SET revoked')) {
+					stmt.run.resolves({ success: true });
+				}
+
+				return stmt;
+			});
+
+			const { handleLogout } = await import('../../../src/handlers/auth.handler.js');
+			const response = await handleLogout(request, env, user);
+			const data = await response.json();
+
+			expect(response.status).to.equal(200);
+			expect(data).to.have.property('ok', true);
+		});
+
+		it('should handle logout without session ID', async () => {
+			const user = { sub: 'user123' };
+
+			const { handleLogout } = await import('../../../src/handlers/auth.handler.js');
+			const response = await handleLogout(request, env, user);
+			const data = await response.json();
+
+			expect(response.status).to.equal(200);
+			expect(data).to.have.property('ok', true);
 		});
 	});
 });

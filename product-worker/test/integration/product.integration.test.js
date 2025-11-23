@@ -159,4 +159,3 @@ describe('Product Worker Integration', () => {
 		});
 	});
 });
-

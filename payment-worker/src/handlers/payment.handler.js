@@ -172,11 +172,14 @@ export async function capturePaymentHandler(req, env) {
 					paymentData,
 				});
 				// Fail the capture if inventory commit fails
-				return jsonError({ 
-					error: 'inventory_commit_failed', 
-					message: 'Failed to commit inventory reservation',
-					details: invRes.body 
-				}, invRes.status || 502);
+				return jsonError(
+					{
+						error: 'inventory_commit_failed',
+						message: 'Failed to commit inventory reservation',
+						details: invRes.body,
+					},
+					invRes.status || 502,
+				);
 			}
 			console.log('[PAYMENT.CAPTURE] Inventory committed successfully');
 		} else {
@@ -186,7 +189,7 @@ export async function capturePaymentHandler(req, env) {
 		// Create order - MUST succeed
 		if (env.ORDER_SERVICE && env.INTERNAL_SECRET) {
 			// Map cart items to order format (only productId, qty, unitPrice, title)
-			const orderItems = (paymentData.metadata?.items || []).map(item => ({
+			const orderItems = (paymentData.metadata?.items || []).map((item) => ({
 				productId: item.productId,
 				qty: item.qty,
 				unitPrice: item.unitPrice,
@@ -224,26 +227,32 @@ export async function capturePaymentHandler(req, env) {
 					payload: orderPayload,
 				});
 				// Fail the capture if order creation fails
-				return jsonError({ 
-					error: 'order_creation_failed', 
-					message: 'Failed to create order',
-					details: ordRes.body 
-				}, ordRes.status || 502);
+				return jsonError(
+					{
+						error: 'order_creation_failed',
+						message: 'Failed to create order',
+						details: ordRes.body,
+					},
+					ordRes.status || 502,
+				);
 			}
-			
+
 			// Extract actual orderId from response if provided
 			const createdOrderId = ordRes.body?.orderId || ordRes.body?.order_id || orderId;
 			console.log('[PAYMENT.CAPTURE] Order created successfully:', createdOrderId);
 			console.log('[PAYMENT.CAPTURE] Order response:', JSON.stringify(ordRes.body));
-			
+
 			// Update orderId to use the one from response
 			orderId = createdOrderId;
 		} else {
 			console.warn('[PAYMENT.CAPTURE] Order service not configured, skipping order creation');
-			return jsonError({ 
-				error: 'order_service_not_configured', 
-				message: 'Order service is not available' 
-			}, 503);
+			return jsonError(
+				{
+					error: 'order_service_not_configured',
+					message: 'Order service is not available',
+				},
+				503,
+			);
 		}
 
 		// Update payment record
