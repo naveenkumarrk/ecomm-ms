@@ -34,8 +34,6 @@ function validateBody(schema) {
 /**
  * GET /products - Get all products
  */
-import { instrumentOperation } from '../helpers/tracing.js';
-
 export async function getProductsHandler(req, env) {
 	return await instrumentOperation(
 		'handler.getProducts',
