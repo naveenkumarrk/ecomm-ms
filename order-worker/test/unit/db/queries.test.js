@@ -78,10 +78,7 @@ describe('db.queries', () => {
 	describe('getAllOrders', () => {
 		it('should fetch all orders with limit', async () => {
 			const mockOrders = {
-				results: [
-					{ order_id: 'order_1' },
-					{ order_id: 'order_2' },
-				],
+				results: [{ order_id: 'order_1' }, { order_id: 'order_2' }],
 			};
 
 			const stmt = {

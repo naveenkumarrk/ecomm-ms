@@ -22,20 +22,40 @@ const handler = {
 			const span = trace.getActiveSpan();
 			const cfRay = request.headers.get('cf-ray') || 'No cf-ray header';
 
+			// Debug: Log span context to verify trace propagation from gateway
 			if (span) {
+				const spanContext = span.spanContext();
+				console.log('[PRODUCT] Span Context:', {
+					traceId: spanContext.traceId,
+					spanId: spanContext.spanId,
+					traceFlags: spanContext.traceFlags,
+					isRemote: spanContext.isRemote,
+				});
+
+				// Check for trace context headers (W3C Trace Context)
+				const traceparent = request.headers.get('traceparent');
+				const tracestate = request.headers.get('tracestate');
+				console.log('[PRODUCT] Trace Context Headers:', {
+					traceparent: traceparent ? traceparent.substring(0, 50) + '...' : 'none',
+					tracestate: tracestate || 'none',
+				});
+
 				span.setAttribute('cf.ray', cfRay);
 				span.setAttribute('http.method', request.method);
 				span.setAttribute('http.url', request.url);
 				span.setAttribute('http.route', new URL(request.url).pathname);
-				
+				span.setAttribute('service.name', env.SERVICE_NAME || 'product-worker');
+
 				span.addEvent('request_received', {
 					message: JSON.stringify({
 						request: request.url,
 						method: request.method,
 						cfRay: cfRay,
-						traceId: span.spanContext().traceId,
+						traceId: spanContext.traceId,
 					}),
 				});
+			} else {
+				console.warn('[PRODUCT] No active span found! Tracing may not be initialized correctly.');
 			}
 
 			const response = await router.fetch(request, env, ctx);
@@ -47,12 +67,19 @@ const handler = {
 					status: response.status,
 					statusText: response.statusText,
 				});
+
+				// Set span status based on response
+				if (response.status >= 500) {
+					span.setStatus({ code: 2, message: `HTTP ${response.status}` }); // ERROR
+				} else if (response.status >= 400) {
+					span.setStatus({ code: 1, message: `HTTP ${response.status}` }); // OK but client error
+				}
 			}
 
 			return response;
 		} catch (error) {
 			console.error('[PRODUCT] Worker error:', error);
-			
+
 			// Record error in span
 			const span = trace.getActiveSpan();
 			if (span) {
@@ -60,10 +87,10 @@ const handler = {
 				span.setStatus({ code: 2, message: error.message }); // ERROR status
 			}
 
-			return new Response(
-				JSON.stringify({ error: 'Internal Server Error', message: error.message }),
-				{ status: 500, headers: { 'Content-Type': 'application/json' } },
-			);
+			return new Response(JSON.stringify({ error: 'Internal Server Error', message: error.message }), {
+				status: 500,
+				headers: { 'Content-Type': 'application/json' },
+			});
 		}
 	},
 };

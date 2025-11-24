@@ -35,8 +35,6 @@ describe('Order Worker Integration', () => {
 		sinon.restore();
 	});
 
-
-
 	describe('GET /orders/:id', () => {
 		it('should retrieve order by ID', async () => {
 			const mockOrder = {

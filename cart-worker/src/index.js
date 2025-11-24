@@ -35,13 +35,13 @@ topRouter.all('*', async (req, env) => {
 			headers: newHeaders,
 			redirect: req.redirect,
 		};
-		
+
 		// Add body and duplex option if request has a body (Node.js requirement)
 		if (req.body) {
 			requestInit.body = req.body;
 			requestInit.duplex = 'half';
 		}
-		
+
 		const forwarded = new Request(forwardedUrl.href, requestInit);
 
 		const res = await stub.fetch(forwarded, { waitUntil: false });

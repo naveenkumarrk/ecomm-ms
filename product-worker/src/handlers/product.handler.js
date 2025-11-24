@@ -9,6 +9,7 @@ import { enrichProductsWithStock, enrichProductWithStock } from '../services/pro
 import { uploadImageToR2, handleImageUpload } from '../services/r2.service.js';
 import { createProductSchema, updateProductSchema, getProductsQuerySchema } from '../validators/product.validator.js';
 import { DEFAULT_PRODUCT_LIMIT, DEFAULT_PRODUCT_OFFSET } from '../config/constants.js';
+import { instrumentOperation } from '../helpers/tracing.js';
 
 /**
  * Validate request body against Joi schema
@@ -33,63 +34,74 @@ function validateBody(schema) {
 /**
  * GET /products - Get all products
  */
+import { instrumentOperation } from '../helpers/tracing.js';
+
 export async function getProductsHandler(req, env) {
-	try {
-		if (!env.DB) {
-			console.error('DB binding not available');
-			return jsonResponse({ error: 'Database not available' }, 500);
-		}
+	return await instrumentOperation(
+		'handler.getProducts',
+		async () => {
+			if (!env.DB) {
+				console.error('DB binding not available');
+				return jsonResponse({ error: 'Database not available' }, 500);
+			}
 
-		const url = new URL(req.url);
-		const limit = Number(url.searchParams.get('limit') || DEFAULT_PRODUCT_LIMIT);
-		const offset = Number(url.searchParams.get('offset') || DEFAULT_PRODUCT_OFFSET);
+			const url = new URL(req.url);
+			const limit = Number(url.searchParams.get('limit') || DEFAULT_PRODUCT_LIMIT);
+			const offset = Number(url.searchParams.get('offset') || DEFAULT_PRODUCT_OFFSET);
 
-		// Validate query parameters
-		const { error: queryError } = getProductsQuerySchema.validate({ limit, offset });
-		if (queryError) {
-			return jsonResponse({ error: 'validation_error', details: queryError.details[0].message }, 400);
-		}
+			// Validate query parameters
+			const { error: queryError } = getProductsQuerySchema.validate({ limit, offset });
+			if (queryError) {
+				return jsonResponse({ error: 'validation_error', details: queryError.details[0].message }, 400);
+			}
 
-		let rows;
-		try {
-			rows = await getProducts(env, limit, offset);
-			console.log('Query successful, rows:', rows?.results?.length || 0);
-		} catch (dbError) {
-			console.error('Database query error:', dbError);
-			return jsonResponse({ error: 'Database query failed', details: dbError.message }, 500);
-		}
+			let rows;
+			try {
+				rows = await getProducts(env, limit, offset);
+				console.log('Query successful, rows:', rows?.results?.length || 0);
+			} catch (dbError) {
+				console.error('Database query error:', dbError);
+				return jsonResponse({ error: 'Database query failed', details: dbError.message }, 500);
+			}
 
-		if (!rows || !rows.results) {
-			console.log('No results from database');
-			return jsonResponse([]);
-		}
+			if (!rows || !rows.results) {
+				console.log('No results from database');
+				return jsonResponse([]);
+			}
 
-		const productsWithVariants = await enrichProductsWithStock(env, rows.results);
-		return jsonResponse(productsWithVariants);
-	} catch (error) {
-		console.error('Products endpoint error:', error);
-		return jsonResponse({ error: 'Internal server error', details: error.message }, 500);
-	}
+			const productsWithVariants = await enrichProductsWithStock(env, rows.results);
+			return jsonResponse(productsWithVariants);
+		},
+		{
+			'handler.operation': 'getProducts',
+			'handler.route': '/products',
+		},
+	);
 }
 
 /**
  * GET /products/:id - Get product by ID
  */
 export async function getProductByIdHandler(req, env) {
-	try {
-		const { id } = req.params;
-		const row = await getProductById(env, id);
+	const { id } = req.params;
+	return await instrumentOperation(
+		'handler.getProductById',
+		async () => {
+			const row = await getProductById(env, id);
 
-		if (!row) {
-			return jsonResponse({ error: 'Product not found' }, 404);
-		}
+			if (!row) {
+				return jsonResponse({ error: 'Product not found' }, 404);
+			}
 
-		const product = await enrichProductWithStock(env, row);
-		return jsonResponse(product);
-	} catch (error) {
-		console.error('Get product by ID error:', error);
-		return jsonResponse({ error: 'Internal server error', details: error.message }, 500);
-	}
+			const product = await enrichProductWithStock(env, row);
+			return jsonResponse(product);
+		},
+		{
+			'handler.operation': 'getProductById',
+			'handler.route': '/products/:id',
+			'handler.product_id': id,
+		},
+	);
 }
 
 /**

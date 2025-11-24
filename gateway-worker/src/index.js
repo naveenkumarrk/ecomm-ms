@@ -21,10 +21,10 @@ setupRoutes(router);
 const handler = {
 	async fetch(request, env, ctx) {
 		const cfRay = request.headers.get('cf-ray') || 'No cf-ray header';
-		
+
 		// Get active span (created by the instrument function)
 		const span = trace.getActiveSpan();
-		
+
 		// Debug: Log span context to verify tracing is working
 		if (span) {
 			const spanContext = span.spanContext();
@@ -33,14 +33,14 @@ const handler = {
 				spanId: spanContext.spanId,
 				traceFlags: spanContext.traceFlags,
 			});
-			
+
 			// Add custom attributes to the span
 			span.setAttribute('cf.ray', cfRay);
 			span.setAttribute('http.method', request.method);
 			span.setAttribute('http.url', request.url);
 			span.setAttribute('http.route', new URL(request.url).pathname);
 			span.setAttribute('service.name', env.SERVICE_NAME || 'ecomm-ms-gateway');
-			
+
 			// Add request received event
 			span.addEvent('request_received', {
 				message: JSON.stringify({
@@ -57,9 +57,7 @@ const handler = {
 		console.log('[GATEWAY] Request:', request.method, new URL(request.url).pathname, 'CF-Ray:', cfRay);
 
 		try {
-			const timeoutPromise = new Promise((_, reject) => 
-				setTimeout(() => reject(new Error('Gateway timeout')), GATEWAY_TIMEOUT)
-			);
+			const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Gateway timeout')), GATEWAY_TIMEOUT));
 
 			const responsePromise = router.fetch(request, env, ctx);
 			const response = await Promise.race([responsePromise, timeoutPromise]);
@@ -94,10 +92,10 @@ const handler = {
 				});
 			}
 
-			return new Response(
-				JSON.stringify({ error: 'Internal Server Error', message: error.message }),
-				{ status: 500, headers: { 'Content-Type': 'application/json' } },
-			);
+			return new Response(JSON.stringify({ error: 'Internal Server Error', message: error.message }), {
+				status: 500,
+				headers: { 'Content-Type': 'application/json' },
+			});
 		}
 	},
 };
@@ -134,17 +132,24 @@ const config = (env, _trigger) => {
 		},
 	};
 
-	console.log('[GATEWAY] OpenTelemetry config:', JSON.stringify({
-		exporter: { 
-			url: configObj.exporter.url, 
-			headers: { 
-				'x-honeycomb-team': env.HONEYCOMB_API_KEY ? '***SET***' : '***MISSING***',
-				'x-honeycomb-dataset': configObj.exporter.headers['x-honeycomb-dataset'] || '***MISSING***'
-			} 
-		},
-		service: configObj.service,
-		fetch: configObj.fetch
-	}, null, 2));
+	console.log(
+		'[GATEWAY] OpenTelemetry config:',
+		JSON.stringify(
+			{
+				exporter: {
+					url: configObj.exporter.url,
+					headers: {
+						'x-honeycomb-team': env.HONEYCOMB_API_KEY ? '***SET***' : '***MISSING***',
+						'x-honeycomb-dataset': configObj.exporter.headers['x-honeycomb-dataset'] || '***MISSING***',
+					},
+				},
+				service: configObj.service,
+				fetch: configObj.fetch,
+			},
+			null,
+			2,
+		),
+	);
 
 	return configObj;
 };

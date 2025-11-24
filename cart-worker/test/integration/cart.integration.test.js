@@ -20,7 +20,7 @@ describe('Cart Worker Integration', () => {
 		mockStub = {
 			fetch: sinon.stub(),
 		};
-		
+
 		env = {
 			CART_DO: {
 				idFromName: sinon.stub().returns('mock-id'),

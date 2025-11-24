@@ -57,7 +57,6 @@ describe('Gateway Worker Integration', () => {
 			expect(response.status).to.equal(200);
 			expect(env.PRODUCTS_SERVICE.fetch).to.have.been.calledOnce;
 		});
-
 	});
 
 	describe('Authentication', () => {

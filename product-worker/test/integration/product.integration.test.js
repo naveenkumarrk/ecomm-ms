@@ -139,6 +139,4 @@ describe('Product Worker Integration', () => {
 			expect(data).to.have.property('error');
 		});
 	});
-
-
 });
