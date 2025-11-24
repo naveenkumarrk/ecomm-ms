@@ -3,6 +3,7 @@
 ## Overview
 
 This implementation creates nested/distributed traces that show the complete flow:
+
 1. **Gateway** receives request (root span)
 2. **Gateway** calls Product Service (child span via fetch)
 3. **Product Service** receives request (child span)
@@ -26,23 +27,27 @@ GET /api/products
 ## Implementation Details
 
 ### 1. Gateway (`gateway-worker/src/index.js`)
+
 - Uses `@microlabs/otel-cf-workers` with `fetch: { enabled: true }`
 - Automatically creates spans for incoming HTTP requests
 - **Automatically propagates trace context** via W3C Trace Context headers when calling other services
 - No manual trace context propagation needed!
 
 ### 2. Product Service (`product-worker/src/index.js`)
+
 - Uses `@microlabs/otel-cf-workers` to receive and continue traces
 - Automatically extracts trace context from incoming request headers
 - Creates spans for incoming HTTP requests
 - Logs trace context for debugging
 
 ### 3. Handler Instrumentation (`product-worker/src/handlers/product.handler.js`)
+
 - Wraps handlers with `instrumentOperation()` to create operation-level spans
 - Adds attributes like `handler.operation`, `handler.route`, `handler.product_id`
 - These spans are children of the HTTP request span
 
 ### 4. Database Query Instrumentation (`product-worker/src/db/queries.js`)
+
 - Wraps all DB queries with `instrumentDbQuery()` helper
 - Creates spans with attributes:
   - `db.system`: "d1"
@@ -53,6 +58,7 @@ GET /api/products
   - `db.success`: Success status (for INSERT/UPDATE/DELETE)
 
 ### 5. Tracing Helper (`product-worker/src/helpers/tracing.js`)
+
 - `instrumentDbQuery()`: Creates DB query spans
 - `instrumentOperation()`: Creates operation-level spans
 - Both automatically:
@@ -81,12 +87,14 @@ GET /api/products
 When you make a request, you should see:
 
 **Gateway logs:**
+
 ```
 [GATEWAY] Span Context: { traceId: 'abc123...', spanId: 'def456...', traceFlags: 1 }
 [GATEWAY] Request: GET /api/products
 ```
 
 **Product Service logs:**
+
 ```
 [PRODUCT] Span Context: { traceId: 'abc123...', spanId: 'ghi789...', traceFlags: 1, isRemote: true }
 [PRODUCT] Trace Context Headers: { traceparent: '00-abc123...', tracestate: 'none' }
@@ -116,16 +124,19 @@ When you make a request, you should see:
 To add the same nested tracing to other services:
 
 1. **Install dependencies:**
+
    ```bash
    npm install @microlabs/otel-cf-workers@^1.0.0-rc.52 @opentelemetry/api@^1.9.0
    ```
 
 2. **Add compatibility flag** to `wrangler.jsonc`:
+
    ```json
    "compatibility_flags": ["nodejs_compat"]
    ```
 
 3. **Add environment variables:**
+
    ```json
    "HONEYCOMB_API_KEY": "...",
    "HONEYCOMB_DATASET": "ecomm-msHCTrace",
@@ -145,17 +156,19 @@ To add the same nested tracing to other services:
 ## Troubleshooting
 
 ### Traces not linked?
+
 - Check that both services use the same `HONEYCOMB_DATASET`
 - Verify `fetch: { enabled: true }` in both gateway and service configs
 - Check logs for `traceparent` header presence
 
 ### DB spans not showing?
+
 - Verify `instrumentDbQuery()` is wrapping all DB calls
 - Check that spans are being created (look for span context in logs)
 - Ensure `@opentelemetry/api` is installed
 
 ### Trace ID is all zeros?
+
 - Check `compatibility_flags: ["nodejs_compat"]` is set
 - Verify `@microlabs/otel-cf-workers` is installed
 - Check that `instrument()` is wrapping the handler
-
