@@ -13,7 +13,7 @@
     "PAYPAL_API": "https://api-m.sandbox.paypal.com",
     "INTERNAL_SECRET": "internalsecret",
     "BASE_RETURN_URL": "http://localhost:5173/checkout/success",
-    "BASE_CANCEL_URL": "http://localhost:8187"
+    "BASE_CANCEL_URL": "http://localhost:8187/checkout/cancel"
   },
   "d1_databases": [
     {
