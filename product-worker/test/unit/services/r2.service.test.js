@@ -70,6 +70,18 @@ describe('r2.service', () => {
 			expect(result1).to.not.equal(result2);
 			expect(mockR2Bucket.put).to.have.been.calledTwice;
 		});
+
+		it('should use fallback filename when imageFile.name is undefined', async () => {
+			const imageData = new Uint8Array(100);
+			const imageFile = new File([imageData], '', { type: 'image/jpeg' });
+			// Remove name property
+			Object.defineProperty(imageFile, 'name', { value: undefined, writable: true });
+
+			const result = await uploadImageToR2(imageFile, mockEnv);
+
+			expect(result).to.include('image_');
+			expect(mockR2Bucket.put).to.have.been.calledOnce;
+		});
 	});
 
 	describe('handleImageUpload', () => {
@@ -159,6 +171,110 @@ describe('r2.service', () => {
 			} catch (error) {
 				expect(error.message).to.include('Empty file');
 			}
+		});
+
+		it('should throw error if file too large in handleImageUpload', async () => {
+			const largeData = new Uint8Array(11 * 1024 * 1024);
+
+			mockRequest = {
+				headers: {
+					get: sinon.stub().withArgs('content-type').returns('image/jpeg'),
+				},
+				arrayBuffer: sinon.stub().resolves(largeData),
+			};
+
+			try {
+				await handleImageUpload(mockRequest, mockEnv);
+				expect.fail('Should have thrown an error');
+			} catch (error) {
+				expect(error.message).to.include('File too large');
+			}
+		});
+
+		it('should handle empty content-type header', async () => {
+			const imageData = new Uint8Array(200);
+
+			mockRequest = {
+				headers: {
+					get: sinon.stub().withArgs('content-type').returns(''),
+				},
+				arrayBuffer: sinon.stub().resolves(imageData),
+			};
+
+			const result = await handleImageUpload(mockRequest, mockEnv);
+
+			expect(result).to.have.property('url');
+			expect(result).to.have.property('contentType', 'image/jpeg'); // Default
+		});
+
+		it('should handle file without name in multipart', async () => {
+			const formData = new FormData();
+			const imageFile = new File([new Uint8Array(100)], '', { type: 'image/jpeg' });
+			formData.append('file', imageFile);
+
+			mockRequest = {
+				headers: {
+					get: sinon.stub().withArgs('content-type').returns('multipart/form-data'),
+				},
+				formData: sinon.stub().resolves(formData),
+			};
+
+			const result = await handleImageUpload(mockRequest, mockEnv);
+
+			expect(result).to.have.property('url');
+			expect(result).to.have.property('path');
+		});
+
+		it('should handle PNG content type', async () => {
+			const imageData = new Uint8Array(200);
+
+			mockRequest = {
+				headers: {
+					get: sinon.stub().withArgs('content-type').returns('image/png'),
+				},
+				arrayBuffer: sinon.stub().resolves(imageData),
+			};
+
+			const result = await handleImageUpload(mockRequest, mockEnv);
+
+			expect(result).to.have.property('url');
+			expect(result).to.have.property('contentType', 'image/png');
+			expect(result.path).to.include('.png');
+		});
+
+		it('should handle GIF content type', async () => {
+			const imageData = new Uint8Array(200);
+
+			mockRequest = {
+				headers: {
+					get: sinon.stub().withArgs('content-type').returns('image/gif'),
+				},
+				arrayBuffer: sinon.stub().resolves(imageData),
+			};
+
+			const result = await handleImageUpload(mockRequest, mockEnv);
+
+			expect(result).to.have.property('url');
+			expect(result).to.have.property('contentType', 'image/gif');
+			expect(result.path).to.include('.gif');
+		});
+
+		it('should handle file without type in multipart', async () => {
+			const formData = new FormData();
+			const imageFile = new File([new Uint8Array(100)], 'test.jpg');
+			Object.defineProperty(imageFile, 'type', { value: '', writable: true });
+			formData.append('file', imageFile);
+
+			mockRequest = {
+				headers: {
+					get: sinon.stub().withArgs('content-type').returns('multipart/form-data'),
+				},
+				formData: sinon.stub().resolves(formData),
+			};
+
+			const result = await handleImageUpload(mockRequest, mockEnv);
+
+			expect(result).to.have.property('contentType', 'image/jpeg'); // Default
 		});
 	});
 });

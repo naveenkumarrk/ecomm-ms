@@ -87,5 +87,13 @@ describe('db.queries', () => {
 
 			expect(result).to.be.null;
 		});
+
+		it('should return null on JSON parse error', async () => {
+			env.PINCODE_KV.get.resolves('invalid json');
+
+			const result = await queries.getPincodeZone(env, '400001');
+
+			expect(result).to.be.null;
+		});
 	});
 });

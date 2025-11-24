@@ -75,6 +75,49 @@ describe('db.queries', () => {
 		});
 	});
 
+	describe('getAllOrders', () => {
+		it('should fetch all orders with limit', async () => {
+			const mockOrders = {
+				results: [
+					{ order_id: 'order_1' },
+					{ order_id: 'order_2' },
+				],
+			};
+
+			const stmt = {
+				bind: sinon.stub().returnsThis(),
+				all: sinon.stub().resolves(mockOrders),
+			};
+
+			env.DB.prepare.returns(stmt);
+
+			const result = await queries.getAllOrders(env, 100);
+
+			expect(env.DB.prepare).to.have.been.calledWith('SELECT * FROM orders ORDER BY created_at DESC LIMIT ?');
+			expect(stmt.bind).to.have.been.calledWith(100);
+			expect(result).to.have.property('results');
+		});
+	});
+
+	describe('checkOrderExists', () => {
+		it('should check if order exists by orderId', async () => {
+			const mockOrder = { order_id: 'order_123' };
+
+			const stmt = {
+				bind: sinon.stub().returnsThis(),
+				first: sinon.stub().resolves(mockOrder),
+			};
+
+			env.DB.prepare.returns(stmt);
+
+			const result = await queries.checkOrderExists(env, 'order_123', 'res_123');
+
+			expect(env.DB.prepare).to.have.been.calledWith('SELECT order_id FROM orders WHERE order_id = ? OR reservation_id = ?');
+			expect(stmt.bind).to.have.been.calledWith('order_123', 'res_123');
+			expect(result).to.have.property('order_id', 'order_123');
+		});
+	});
+
 	describe('createOrder', () => {
 		it('should create a new order', async () => {
 			const orderData = {
@@ -102,6 +145,24 @@ describe('db.queries', () => {
 			await queries.createOrder(env, orderData);
 
 			expect(env.DB.prepare).to.have.been.called;
+			expect(stmt.run).to.have.been.calledOnce;
+		});
+	});
+
+	describe('updateOrderStatus', () => {
+		it('should update order status', async () => {
+			const stmt = {
+				bind: sinon.stub().returnsThis(),
+				run: sinon.stub().resolves({ success: true }),
+			};
+
+			env.DB.prepare.returns(stmt);
+
+			const now = Date.now();
+			await queries.updateOrderStatus(env, 'order_123', 'shipped', now);
+
+			expect(env.DB.prepare).to.have.been.calledWith('UPDATE orders SET status=?, updated_at=? WHERE order_id=?');
+			expect(stmt.bind).to.have.been.calledWith('shipped', now, 'order_123');
 			expect(stmt.run).to.have.been.calledOnce;
 		});
 	});

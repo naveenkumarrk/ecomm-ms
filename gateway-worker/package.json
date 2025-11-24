@@ -27,6 +27,7 @@
 		"wrangler": "^4.49.0"
 	},
 	"dependencies": {
+		"@opentelemetry/api": "^1.9.0",
 		"itty-router": "^5.0.22"
 	}
 }

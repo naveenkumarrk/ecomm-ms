@@ -92,6 +92,16 @@ describe('cart.service', () => {
 			expect(result).to.have.property('discount', 0);
 			expect(result).to.have.property('discountType', null);
 		});
+
+		it('should return zero discount for unknown coupon type', () => {
+			const coupon = { type: 'unknown', value: 50 };
+			const subtotal = 1000;
+
+			const result = calculateDiscount(coupon, subtotal);
+
+			expect(result).to.have.property('discount', 0);
+			expect(result).to.have.property('discountType', null);
+		});
 	});
 
 	describe('resetCheckoutState', () => {
