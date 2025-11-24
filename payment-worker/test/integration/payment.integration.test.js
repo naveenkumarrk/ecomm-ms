@@ -3,8 +3,29 @@
  * Tests full payment processing flow
  */
 import { describe, it, beforeEach, afterEach } from 'mocha';
-import handler from '../../../src/index.js';
+import { fileURLToPath } from 'url';
+import { dirname, resolve } from 'path';
 import sinon from 'sinon';
+
+// Resolve import path relative to this file to avoid CI path resolution issues
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const handlerModule = await import('file://' + resolve(__dirname, '../../src/index.js'));
+const handler = handlerModule.default;
+
+// Helper function to generate HMAC signature
+async function generateSignature(secret, method, path, body = '') {
+	const enc = new TextEncoder();
+	const key = await crypto.subtle.importKey('raw', enc.encode(secret || ''), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+	const ts = Date.now().toString();
+	const bodyStr = typeof body === 'string' ? body : JSON.stringify(body);
+	const msg = `${ts}|${method.toUpperCase()}|${path}|${bodyStr}`;
+	const sig = await crypto.subtle.sign('HMAC', key, enc.encode(msg));
+	const signature = Array.from(new Uint8Array(sig))
+		.map((b) => b.toString(16).padStart(2, '0'))
+		.join('');
+	return { timestamp: ts, signature };
+}
 
 describe('Payment Worker Integration', () => {
 	let env, request;
@@ -67,19 +88,22 @@ describe('Payment Worker Integration', () => {
 			env.DB.prepare().bind.returnsThis();
 			env.DB.prepare().run.resolves({ success: true });
 
+			const body = JSON.stringify({
+				reservationId: 'res_123',
+				amount: 99.99,
+				currency: 'USD',
+				userId: 'user_123',
+			});
+			const { timestamp, signature } = await generateSignature(env.INTERNAL_SECRET, 'POST', '/payment/paypal/create', body);
+
 			request = new Request('https://example.com/payment/paypal/create', {
 				method: 'POST',
 				headers: {
 					'Content-Type': 'application/json',
-					'x-timestamp': Date.now().toString(),
-					'x-signature': 'test-signature',
+					'x-timestamp': timestamp,
+					'x-signature': signature,
 				},
-				body: JSON.stringify({
-					reservationId: 'res_123',
-					amount: 99.99,
-					currency: 'USD',
-					userId: 'user_123',
-				}),
+				body,
 			});
 
 			const response = await handler.fetch(request, env);

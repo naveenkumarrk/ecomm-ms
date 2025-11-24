@@ -3,16 +3,28 @@
  * Tests full cart operations flow
  */
 import { describe, it, beforeEach, afterEach } from 'mocha';
-import handler from '../../../src/index.js';
+import { fileURLToPath } from 'url';
+import { dirname, resolve } from 'path';
 import sinon from 'sinon';
 
+// Resolve import path relative to this file to avoid CI path resolution issues
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const handlerModule = await import('file://' + resolve(__dirname, '../../src/index.js'));
+const handler = handlerModule.default;
+
 describe('Cart Worker Integration', () => {
-	let env, request;
+	let env, request, mockStub;
 
 	beforeEach(() => {
+		mockStub = {
+			fetch: sinon.stub(),
+		};
+
 		env = {
 			CART_DO: {
-				get: sinon.stub(),
+				idFromName: sinon.stub().returns('mock-id'),
+				get: sinon.stub().returns(mockStub),
 			},
 			PRODUCTS_SERVICE: {
 				fetch: sinon.stub(),
@@ -27,22 +39,18 @@ describe('Cart Worker Integration', () => {
 
 	describe('POST /cart/:cartId/add', () => {
 		it('should add item to cart', async () => {
-			const mockStub = {
-				fetch: sinon.stub().resolves(
-					new Response(
-						JSON.stringify({
-							success: true,
-							cart: {
-								cartId: 'cart_123',
-								items: [{ productId: 'pro_1', qty: 1 }],
-							},
-						}),
-						{ status: 200 },
-					),
+			mockStub.fetch.resolves(
+				new Response(
+					JSON.stringify({
+						success: true,
+						cart: {
+							cartId: 'cart_123',
+							items: [{ productId: 'pro_1', qty: 1 }],
+						},
+					}),
+					{ status: 200 },
 				),
-			};
-
-			env.CART_DO.get.returns(mockStub);
+			);
 
 			request = new Request('https://example.com/cart/cart_123/add', {
 				method: 'POST',
@@ -67,20 +75,16 @@ describe('Cart Worker Integration', () => {
 
 	describe('GET /cart/:cartId', () => {
 		it('should retrieve cart', async () => {
-			const mockStub = {
-				fetch: sinon.stub().resolves(
-					new Response(
-						JSON.stringify({
-							cartId: 'cart_123',
-							items: [],
-							summary: { subtotal: 0, total: 0 },
-						}),
-						{ status: 200 },
-					),
+			mockStub.fetch.resolves(
+				new Response(
+					JSON.stringify({
+						cartId: 'cart_123',
+						items: [],
+						summary: { subtotal: 0, total: 0 },
+					}),
+					{ status: 200 },
 				),
-			};
-
-			env.CART_DO.get.returns(mockStub);
+			);
 
 			request = new Request('https://example.com/cart/cart_123', {
 				method: 'GET',

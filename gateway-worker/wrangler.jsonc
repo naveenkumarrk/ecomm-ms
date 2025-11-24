@@ -4,6 +4,7 @@
   "main": "src/index.js",
   "type": "module",
   "compatibility_date": "2025-11-19",
+  "compatibility_flags": ["nodejs_compat"],
   "observability": {
     "enabled": true
   },
@@ -50,7 +51,7 @@
 		"OTEL_EXPORTER_HEADERS": "{ \"x-honeycomb-team\": \"hcaik_01k9vs9pp541hp4k5fy56qa0j651g67x2qzjq776115jx5z2rq42r4kda1\", \"x-honeycomb-dataset\": \"ecomm-msHCTrace\" }",
 
 		// Logical service name for your telemetry
-		"SERVICE_NAME": "ecomm-msHCTrace",
+		"SERVICE_NAME": "ecomm-ms-gateway",
 
 		// Enable tracing
 		"OTEL_TRACES_SAMPLER": "always_on",

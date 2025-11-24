@@ -1,7 +1,9 @@
 /**
  * Service caller - Handles both service bindings and URLs
+ * Ensures trace context propagation for distributed tracing
  */
 import { DEFAULT_TIMEOUT } from '../config/constants.js';
+import { trace, context, propagation } from '@opentelemetry/api';
 
 export async function callService(
 	serviceName,
@@ -29,6 +31,24 @@ export async function callService(
 			reqHeaders['x-session-id'] = userContext.sid;
 		}
 
+		// Get active span to propagate trace context
+		const activeSpan = trace.getActiveSpan();
+		if (activeSpan) {
+			const spanContext = activeSpan.spanContext();
+			console.log(`[GATEWAY] Propagating trace context to ${serviceName}:`, {
+				traceId: spanContext.traceId,
+				spanId: spanContext.spanId,
+			});
+
+			// Manually inject trace context into headers for service bindings
+			// (fetch() calls are automatically instrumented, but service bindings need manual propagation)
+			propagation.inject(context.active(), reqHeaders, {
+				set: (carrier, key, value) => {
+					carrier[key] = value;
+				},
+			});
+		}
+
 		// Determine target - try service binding first, then URL
 		let fetchPromise;
 		const serviceBinding = env[serviceName];
@@ -45,10 +65,11 @@ export async function callService(
 				}),
 			);
 		}
-		// Fallback to URL
+		// Fallback to URL - fetch() is automatically instrumented by @microlabs/otel-cf-workers
 		else if (serviceUrl && serviceUrl.startsWith('http')) {
 			console.log(`[GATEWAY] Using URL for ${serviceName}: ${serviceUrl}`);
 			const fullUrl = serviceUrl.replace(/\/$/, '') + path;
+			// Use the instrumented fetch from the active context
 			fetchPromise = fetch(fullUrl, {
 				method,
 				headers: reqHeaders,

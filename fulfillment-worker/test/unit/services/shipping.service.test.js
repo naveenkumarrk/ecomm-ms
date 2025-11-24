@@ -115,7 +115,6 @@ describe('shipping.service', () => {
 			expect(discountApplied).to.have.property('couponType', 'percent_shipping');
 		});
 
-
 		it('should apply flat shipping coupon discount', () => {
 			const env = {};
 			const totalWeight = 2.0;
