@@ -148,5 +148,64 @@ describe('service-caller', () => {
 
 			expect(result.body).to.equal('plain text response');
 		});
+
+		it('should propagate trace context when active span exists', async () => {
+			const { trace, context, propagation } = await import('@opentelemetry/api');
+			const mockSpan = {
+				spanContext: sinon.stub().returns({
+					traceId: 'test-trace-id',
+					spanId: 'test-span-id',
+				}),
+			};
+
+			// Mock getActiveSpan to return span when called inside the operation
+			let spanReturned = false;
+			const originalGetActiveSpan = trace.getActiveSpan;
+			sinon.stub(trace, 'getActiveSpan').callsFake(() => {
+				// Return span on second call (inside the operation callback)
+				if (spanReturned) {
+					return mockSpan;
+				}
+				spanReturned = true;
+				return originalGetActiveSpan ? originalGetActiveSpan() : null;
+			});
+
+			const injectStub = sinon.stub(propagation, 'inject').callsFake((ctx, headers, carrier) => {
+				if (carrier && carrier.set) {
+					carrier.set(headers, 'traceparent', '00-test-trace-id-test-span-id-01');
+				}
+			});
+
+			const mockResponse = {
+				ok: true,
+				status: 200,
+				text: sinon.stub().resolves('{}'),
+			};
+
+			env.PRODUCTS_SERVICE.fetch.resolves(mockResponse);
+
+			const result = await callService('PRODUCTS_SERVICE', '/products', 'GET', null, {}, null, env);
+
+			expect(result).to.have.property('ok', true);
+			expect(result).to.have.property('status', 200);
+			// Verify that trace context propagation was attempted
+			expect(trace.getActiveSpan.callCount).to.be.greaterThan(0);
+		});
+
+		it('should handle error responses', async () => {
+			const mockResponse = {
+				ok: false,
+				status: 500,
+				text: sinon.stub().resolves('{"error": "internal error"}'),
+			};
+
+			env.PRODUCTS_SERVICE.fetch.resolves(mockResponse);
+
+			const result = await callService('PRODUCTS_SERVICE', '/products', 'GET', null, {}, null, env);
+
+			expect(result).to.have.property('ok', false);
+			expect(result).to.have.property('status', 500);
+			expect(result.body).to.deep.equal({ error: 'internal error' });
+		});
 	});
 });

@@ -18,5 +18,10 @@
     "ORDERS_SERVICE_URL": "https://order-worker.111naveenkumarrk.workers.dev",
     "INVENTORY_SERVICE_URL": "https://inventory-worker.111naveenkumarrk.workers.dev",
     "INTERNAL_SECRET": "internalsecret"
+  },
+  "env": {
+    "staging": {
+      "name": "order-worker-staging"
+    }
   }
 }

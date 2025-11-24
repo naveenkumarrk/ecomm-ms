@@ -22,5 +22,10 @@
   ],
   "vars": {
     "INTERNAL_SECRET": "internalsecret"
+  },
+  "env": {
+    "staging": {
+      "name": "inventory-worker-staging"
+    }
   }
 }
