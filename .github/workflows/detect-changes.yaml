@@ -112,8 +112,9 @@ jobs:
             SERVICES_JSON='[]'
             SERVICES_STRING=''
           else
-          SERVICES_JSON=$(printf '%s\n' "${SERVICES_ARRAY[@]}" | jq -R . | jq -s .)
-          SERVICES_STRING=$(IFS=' '; echo "${SERVICES_ARRAY[*]}")
+            # Use -c flag for compact (single-line) JSON output
+            SERVICES_JSON=$(printf '%s\n' "${SERVICES_ARRAY[@]}" | jq -R . | jq -c -s .)
+            SERVICES_STRING=$(IFS=' '; echo "${SERVICES_ARRAY[*]}")
           fi
           
           # Output JSON as single line for GitHub Actions compatibility
