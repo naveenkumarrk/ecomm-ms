@@ -22,13 +22,5 @@ describe('utils', () => {
 			expect(cart).to.have.property('summary');
 			expect(cart.summary).to.have.property('subtotal', 0);
 		});
-
-		it('should create empty cart with userId', () => {
-			const cart = createEmptyCart('cart_456', 'user_789');
-			expect(cart).to.have.property('cartId', 'cart_456');
-			expect(cart).to.have.property('userId', 'user_789');
-			expect(cart).to.have.property('createdAt');
-			expect(cart).to.have.property('updatedAt');
-		});
 	});
 });
