@@ -142,9 +142,148 @@ export async function capturePaymentHandler(req, env) {
 			return jsonError({ error: 'forbidden', message: 'Payment does not belong to user' }, 403);
 		}
 
-		// Capture via PayPal
-		const { captureId, raw } = await capturePaypalOrder(env, paypalOrderId);
-		capJson = raw;
+		// Check PayPal order status first to see if already captured
+		let capJson = null;
+		let captureId = null;
+
+		try {
+			// Try to capture first - most common case
+			const captureResult = await capturePaypalOrder(env, paypalOrderId);
+			captureId = captureResult.captureId;
+			capJson = captureResult.raw;
+			console.log('[PAYMENT.CAPTURE] PayPal capture successful, captureId:', captureId);
+		} catch (captureErr) {
+			// If capture fails, check if it's because order is already captured
+			if (captureErr.error === 'capture_failed' && captureErr.details) {
+				const details = captureErr.details;
+				console.log('[PAYMENT.CAPTURE] Capture failed, checking if order already captured:', details);
+
+				// Check if error indicates order already captured
+				const isAlreadyCaptured =
+					details.name === 'UNPROCESSABLE_ENTITY' ||
+					details.error === 'ORDER_ALREADY_CAPTURED' ||
+					(details.details &&
+						Array.isArray(details.details) &&
+						details.details.some(
+							(d) =>
+								d.issue === 'ORDER_ALREADY_CAPTURED' ||
+								d.issue === 'INSTRUMENT_DECLINED' ||
+								d.description?.includes('already captured') ||
+								d.description?.includes('already completed'),
+						));
+
+				if (isAlreadyCaptured || captureErr.status === 422) {
+					// Order might already be captured, verify and get capture info
+					console.log('[PAYMENT.CAPTURE] Order appears to be already captured, verifying status...');
+					try {
+						const verifyResult = await verifyPaypalOrder(env, paypalOrderId);
+						if (verifyResult.ok && verifyResult.data) {
+							const orderData = verifyResult.data;
+							const orderStatus = orderData.status;
+							console.log('[PAYMENT.CAPTURE] PayPal order status:', orderStatus);
+
+							if (orderStatus === 'COMPLETED') {
+								// Order is completed, extract capture ID
+								const purchaseUnits = orderData.purchase_units || [];
+								for (const pu of purchaseUnits) {
+									const captures = (pu.payments || {}).captures || [];
+									for (const c of captures) {
+										if (c.status === 'COMPLETED' || c.status === 'PENDING') {
+											captureId = c.id;
+											capJson = orderData;
+											console.log('[PAYMENT.CAPTURE] Found existing capture, captureId:', captureId);
+											break;
+										}
+									}
+									if (captureId) break;
+								}
+
+								if (captureId) {
+									// Successfully found existing capture, proceed with order creation
+									console.log('[PAYMENT.CAPTURE] Using existing capture, proceeding with order creation');
+								} else {
+									// Order completed but no capture found
+									return jsonError(
+										{
+											error: 'order_already_completed',
+											message: 'Order is already completed but capture ID not found',
+											details: orderData,
+										},
+										400,
+									);
+								}
+							} else if (orderStatus === 'APPROVED') {
+								// Order is approved but capture failed - this is unexpected
+								return jsonError(
+									{
+										error: 'capture_failed',
+										details: captureErr.details,
+										message: 'Order is approved but capture failed. Please try again.',
+									},
+									captureErr.status || 502,
+								);
+							} else {
+								// Order is in an invalid state
+								return jsonError(
+									{
+										error: 'invalid_order_state',
+										message: `Order is in ${orderStatus} state and cannot be captured`,
+										details: { status: orderStatus, orderId: paypalOrderId },
+									},
+									400,
+								);
+							}
+						} else {
+							// Verification failed
+							throw new Error('Failed to verify order status');
+						}
+					} catch (verifyErr) {
+						console.error('[PAYMENT.CAPTURE] Failed to verify order status:', verifyErr);
+						// Return original capture error
+						return jsonError(
+							{
+								error: 'capture_failed',
+								details: captureErr.details,
+								message: captureErr.details?.message || captureErr.details?.details?.[0]?.description || 'Failed to capture PayPal payment',
+							},
+							captureErr.status || 502,
+						);
+					}
+				} else {
+					// Different error, return it
+					console.error('[PAYMENT.CAPTURE] Capture failed with unexpected error:', captureErr);
+					return jsonError(
+						{
+							error: 'capture_failed',
+							details: captureErr.details,
+							message: captureErr.details?.message || captureErr.details?.details?.[0]?.description || 'Failed to capture PayPal payment',
+						},
+						captureErr.status || 502,
+					);
+				}
+			} else {
+				// Unexpected error
+				console.error('[PAYMENT.CAPTURE] Unexpected capture error:', captureErr);
+				return jsonError(
+					{
+						error: 'server_error',
+						message: String(captureErr),
+					},
+					500,
+				);
+			}
+		}
+
+		// If we still don't have a capture ID at this point, something went wrong
+		if (!captureId) {
+			return jsonError(
+				{
+					error: 'capture_failed',
+					message: 'Failed to capture payment or retrieve existing capture',
+				},
+				502,
+			);
+		}
 
 		console.log('[PAYMENT.CAPTURE] PayPal capture successful, captureId:', captureId);
 
