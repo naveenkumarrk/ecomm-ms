@@ -34,17 +34,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Slack Notification
-        uses: slackapi/slack-github-action@v1
-        with:
-          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
-          payload: |
-            {
-              "text": "<!here> @ecomm-ms Production deploy finished",
-              "blocks":[
-                {"type":"section","text":{"type":"mrkdwn","text":"*Production deploy finished*"}},
-                {"type":"section","fields":[{"type":"mrkdwn","text":"*Services:* ${{ needs.detect.outputs.services }}"}]}
-              ]
-            }
+        if: secrets.SLACK_WEBHOOK_URL != ''
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          PAYLOAD=$(cat <<EOF
+          {
+            "text": "<!here> @ecomm-ms Production deploy finished",
+            "blocks":[
+              {"type":"section","text":{"type":"mrkdwn","text":"*Production deploy finished*"}},
+              {"type":"section","fields":[{"type":"mrkdwn","text":"*Services:* ${{ needs.detect.outputs.services }}"}]}
+            ]
+          }
+          EOF
+          )
+          curl -X POST -H 'Content-type: application/json' --data "$PAYLOAD" "$SLACK_WEBHOOK_URL" || true
 
   rollback:
     needs: [deploy, detect]
@@ -69,14 +73,18 @@ jobs:
           npx wrangler rollback || true
 
       - name: Slack Rollback Notification
-        uses: slackapi/slack-github-action@v1
-        with:
-          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
-          payload: |
-            {
-              "text": "<!here> @ecomm-ms Production deployment failed — rolled back",
-              "blocks":[
-                {"type":"section","text":{"type":"mrkdwn","text":"*Production Rollback Performed*"}},
-                {"type":"section","fields":[{"type":"mrkdwn","text":"*Service:* ${{ matrix.service }}"}]}
-              ]
-            }
+        if: secrets.SLACK_WEBHOOK_URL != ''
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          PAYLOAD=$(cat <<EOF
+          {
+            "text": "<!here> @ecomm-ms Production deployment failed — rolled back",
+            "blocks":[
+              {"type":"section","text":{"type":"mrkdwn","text":"*Production Rollback Performed*"}},
+              {"type":"section","fields":[{"type":"mrkdwn","text":"*Service:* ${{ matrix.service }}"}]}
+            ]
+          }
+          EOF
+          )
+          curl -X POST -H 'Content-type: application/json' --data "$PAYLOAD" "$SLACK_WEBHOOK_URL" || true

@@ -90,19 +90,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Send Slack Notification
-        uses: slackapi/slack-github-action@v1
-        with:
-          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
-          payload: |
-            {
-              "text": "<!here> CI Feature results for PR #${{ github.event.pull_request.number }}",
-              "blocks": [
-                { "type": "section", "text": { "type": "mrkdwn", "text": "*CI Feature Result*"} },
-                { "type": "section", "fields": [
-                    { "type": "mrkdwn", "text": "*Repo:*\n${{ github.server_url }}/${{ github.repository }}" },
-                    { "type": "mrkdwn", "text": "*PR:*\n#${{ github.event.pull_request.number }} - ${{ github.event.pull_request.title }}" },
-                    { "type": "mrkdwn", "text": "*Result:*\n${{ needs.auto-merge.result }}" },
-                    { "type": "mrkdwn", "text": "*Services:*\n${{ needs.detect.outputs.services }}" }
-                ] }
-              ]
-            }
+        if: always() && secrets.SLACK_WEBHOOK_URL != ''
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          PAYLOAD=$(cat <<EOF
+          {
+            "text": "<!here> CI Feature results for PR #${{ github.event.pull_request.number }}",
+            "blocks": [
+              { "type": "section", "text": { "type": "mrkdwn", "text": "*CI Feature Result*"} },
+              { "type": "section", "fields": [
+                  { "type": "mrkdwn", "text": "*Repo:*\n${{ github.server_url }}/${{ github.repository }}" },
+                  { "type": "mrkdwn", "text": "*PR:*\n#${{ github.event.pull_request.number }} - ${{ github.event.pull_request.title }}" },
+                  { "type": "mrkdwn", "text": "*Result:*\n${{ needs.auto-merge.result }}" },
+                  { "type": "mrkdwn", "text": "*Services:*\n${{ needs.detect.outputs.services }}" }
+              ] }
+            ]
+          }
+          EOF
+          )
+          curl -X POST -H 'Content-type: application/json' --data "$PAYLOAD" "$SLACK_WEBHOOK_URL" || true

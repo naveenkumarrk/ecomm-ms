@@ -56,7 +56,12 @@ jobs:
           fi
           SERVICES_JSON=$(printf '%s\n' "${SERVICES_ARRAY[@]}" | jq -R . | jq -s .)
           SERVICES_STRING=$(IFS=' '; echo "${SERVICES_ARRAY[*]}")
-          echo "services-json=$SERVICES_JSON" >> $GITHUB_OUTPUT
+          # Use delimiter to properly handle multi-line JSON
+          {
+            echo "services-json<<EOF"
+            echo "$SERVICES_JSON"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
           echo "services=$SERVICES_STRING" >> $GITHUB_OUTPUT
           echo "has-changes=$HAS_CHANGES" >> $GITHUB_OUTPUT
           if [ "$HAS_CHANGES" = "true" ]; then

@@ -141,14 +141,18 @@ jobs:
           npx wrangler rollback --env staging || true
 
       - name: Send Slack Rollback Notification
-        uses: slackapi/slack-github-action@v1
-        with:
-          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
-          payload: |
-            {
-              "text": "<!here> @ecomm-ms Staging deployment failed — rolled back",
-              "blocks":[
-                {"type":"section","text":{"type":"mrkdwn","text":"*Staging Rollback Performed*"}},
-                {"type":"section","fields":[{"type":"mrkdwn","text":"*Service:* ${{ matrix.service }}"}]}
-              ]
-            }
+        if: secrets.SLACK_WEBHOOK_URL != ''
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          PAYLOAD=$(cat <<EOF
+          {
+            "text": "<!here> @ecomm-ms Staging deployment failed — rolled back",
+            "blocks":[
+              {"type":"section","text":{"type":"mrkdwn","text":"*Staging Rollback Performed*"}},
+              {"type":"section","fields":[{"type":"mrkdwn","text":"*Service:* ${{ matrix.service }}"}]}
+            ]
+          }
+          EOF
+          )
+          curl -X POST -H 'Content-type: application/json' --data "$PAYLOAD" "$SLACK_WEBHOOK_URL" || true
