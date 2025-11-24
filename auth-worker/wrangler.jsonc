@@ -53,22 +53,7 @@
 	// "services": [{ "binding": "MY_SERVICE", "service": "my-service" }]
 	"env": {
 		"staging": {
-			"name": "auth-worker-staging",
-			"observability": {
-				"enabled": true
-			},
-			"d1_databases": [
-				{
-					"binding": "DB",
-					"database_name": "auth-db",
-					"database_id": "b050b9a8-0fa3-4e87-8893-b22a397cb853"
-				}
-			],
-			"vars": {
-				"ACCESS_TOKEN_TTL": 86400,
-				"ADMIN_SECRET": "adminsecret",
-				"JWT_SECRET": "lw+prJIH54ibX8krgSqd+XtrWonIjJecKw4cUtvzLdQ="
-			}
+			"name": "auth-worker-staging"
 		}
 	}
 }
