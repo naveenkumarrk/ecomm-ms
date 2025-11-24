@@ -35,6 +35,7 @@ jobs:
       - name: Run Prettier / Lint
         working-directory: ${{ inputs.service }}
         run: |
+          npm run format
           if npm run format:check --silent; then
             echo "lint=success"
           else
