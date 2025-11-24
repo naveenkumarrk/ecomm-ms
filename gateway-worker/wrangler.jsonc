@@ -33,7 +33,32 @@
     "INTERNAL_SECRET": "internalsecret",
     "ADMIN_SECRET": "adminsecret",
     "ACCESS_TOKEN_TTL": 86400,
-    "JWT_SECRET": "lw+prJIH54ibX8krgSqd+XtrWonIjJecKw4cUtvzLdQ="
+    "JWT_SECRET": "lw+prJIH54ibX8krgSqd+XtrWonIjJecKw4cUtvzLdQ=",
+
+
+
+    // Honeycomb tracing endpoint
+		"OTEL_EXPORTER_URL": "https://api.honeycomb.io/v1/traces",
+
+		// for production, use `wrangler secret put`
+		"HONEYCOMB_API_KEY": "hcaik_01k9vs9pp541hp4k5fy56qa0j651g67x2qzjq776115jx5z2rq42r4kda1",
+
+		// The dataset to send traces to
+		"HONEYCOMB_DATASET": "ecomm-msHCTrace",
+
+		// Prebuilt JSON headers for the Honeycomb exporter
+		"OTEL_EXPORTER_HEADERS": "{ \"x-honeycomb-team\": \"hcaik_01k9vs9pp541hp4k5fy56qa0j651g67x2qzjq776115jx5z2rq42r4kda1\", \"x-honeycomb-dataset\": \"ecomm-msHCTrace\" }",
+
+		// Logical service name for your telemetry
+		"SERVICE_NAME": "ecomm-msHCTrace",
+
+		// Enable tracing
+		"OTEL_TRACES_SAMPLER": "always_on",
+
+		// Set the sampling rate (0.0 to 1.0)
+		"OTEL_TRACES_SAMPLER_ARG": "1.0",
+
+		// Set the maximum number of attributes per span
   },
   "services": [
     {

@@ -160,5 +160,23 @@ describe('r2.service', () => {
 				expect(error.message).to.include('Empty file');
 			}
 		});
+
+		it('should throw error if file too large in handleImageUpload', async () => {
+			const largeData = new Uint8Array(11 * 1024 * 1024);
+
+			mockRequest = {
+				headers: {
+					get: sinon.stub().withArgs('content-type').returns('image/jpeg'),
+				},
+				arrayBuffer: sinon.stub().resolves(largeData),
+			};
+
+			try {
+				await handleImageUpload(mockRequest, mockEnv);
+				expect.fail('Should have thrown an error');
+			} catch (error) {
+				expect(error.message).to.include('File too large');
+			}
+		});
 	});
 });

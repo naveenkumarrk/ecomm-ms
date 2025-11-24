@@ -114,6 +114,83 @@ describe('shipping.service', () => {
 			expect(discountApplied).to.have.property('coupon', 'SAVE10');
 			expect(discountApplied).to.have.property('couponType', 'percent_shipping');
 		});
+
+		it('should apply express threshold discount', () => {
+			const env = {};
+			const totalWeight = 2.0;
+			const subtotal = 800; // Above express discount threshold but below free threshold
+			const zone = 'MUM';
+			const transitDays = 1;
+			const chosenWarehouse = { warehouseId: 'wh_1', handlingHours: 24 };
+			const couponDiscount = null;
+
+			const { options, discountApplied } = calculateShippingOptions(
+				env,
+				totalWeight,
+				subtotal,
+				zone,
+				transitDays,
+				chosenWarehouse,
+				couponDiscount,
+			);
+
+			expect(discountApplied).to.have.property('type', 'express_threshold_discount');
+		});
+
+		it('should apply flat shipping coupon discount', () => {
+			const env = {};
+			const totalWeight = 2.0;
+			const subtotal = 500;
+			const zone = 'MUM';
+			const transitDays = 1;
+			const chosenWarehouse = { warehouseId: 'wh_1', handlingHours: 24 };
+			const couponDiscount = {
+				code: 'FLAT20',
+				type: 'flat_shipping',
+				value: 20,
+			};
+
+			const { options, discountApplied } = calculateShippingOptions(
+				env,
+				totalWeight,
+				subtotal,
+				zone,
+				transitDays,
+				chosenWarehouse,
+				couponDiscount,
+			);
+
+			expect(discountApplied).to.have.property('coupon', 'FLAT20');
+			expect(discountApplied).to.have.property('couponType', 'flat_shipping');
+		});
+
+		it('should apply free shipping coupon', () => {
+			const env = {};
+			const totalWeight = 2.0;
+			const subtotal = 500;
+			const zone = 'MUM';
+			const transitDays = 1;
+			const chosenWarehouse = { warehouseId: 'wh_1', handlingHours: 24 };
+			const couponDiscount = {
+				code: 'FREESHIP',
+				type: 'free_shipping',
+			};
+
+			const { options, discountApplied } = calculateShippingOptions(
+				env,
+				totalWeight,
+				subtotal,
+				zone,
+				transitDays,
+				chosenWarehouse,
+				couponDiscount,
+			);
+
+			expect(options[0].cost).to.equal(0); // Standard free
+			expect(options[1].cost).to.equal(0); // Express free
+			expect(discountApplied).to.have.property('coupon', 'FREESHIP');
+			expect(discountApplied).to.have.property('couponType', 'free_shipping');
+		});
 	});
 
 	describe('getZoneTransitDays', () => {
