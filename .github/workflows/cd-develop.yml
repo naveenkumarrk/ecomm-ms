@@ -17,7 +17,7 @@ jobs:
 
   deploy:
     needs: detect
-    if: needs.detect.outputs.has-changes == 'true' && needs.detect.outputs.services-json != '[]' && needs.detect.outputs.services-json != '' && needs.detect.outputs.services-json != 'null' && length(fromJson(needs.detect.outputs.services-json)) > 0
+    if: needs.detect.outputs.has-changes == 'true' && needs.detect.outputs.services-json != '[]' && needs.detect.outputs.services-json != '' && needs.detect.outputs.services-json != 'null'
     strategy:
       fail-fast: false
       matrix:
@@ -32,7 +32,7 @@ jobs:
 
   integration-tests:
     needs: [deploy, detect]
-    if: needs.detect.outputs.has-changes == 'true' && needs.detect.outputs.services-json != '[]' && needs.detect.outputs.services-json != '' && needs.detect.outputs.services-json != 'null' && length(fromJson(needs.detect.outputs.services-json)) > 0 && needs.deploy.result == 'success'
+    if: needs.detect.outputs.has-changes == 'true' && needs.detect.outputs.services-json != '[]' && needs.detect.outputs.services-json != '' && needs.detect.outputs.services-json != 'null' && needs.deploy.result == 'success'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -120,7 +120,7 @@ jobs:
 
   rollback:
     needs: [deploy, integration-tests, detect]
-    if: failure() && needs.detect.outputs.has-changes == 'true' && needs.detect.outputs.services-json != '[]' && needs.detect.outputs.services-json != '' && needs.detect.outputs.services-json != 'null' && length(fromJson(needs.detect.outputs.services-json)) > 0
+    if: failure() && needs.detect.outputs.has-changes == 'true' && needs.detect.outputs.services-json != '[]' && needs.detect.outputs.services-json != '' && needs.detect.outputs.services-json != 'null'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
