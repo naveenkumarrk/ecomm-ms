@@ -5,10 +5,6 @@ on:
       service:
         required: true
         type: string
-      environment:
-        required: false
-        type: string
-        default: "production"
       wrangler-env:
         required: false
         type: string
@@ -57,8 +53,6 @@ jobs:
           set -o pipefail
           if [ -n "${{ inputs.wrangler-env }}" ]; then
             CMD="npx wrangler deploy --env ${{ inputs.wrangler-env }}"
-          elif [ "${{ inputs.environment }}" = "staging" ]; then
-            CMD="npx wrangler deploy --env staging"
           else
             CMD="npx wrangler deploy"
           fi
@@ -69,7 +63,7 @@ jobs:
           DEPLOYMENT_ID=$(echo "$OUTPUT" | grep -oP 'deployment-id: \K[a-f0-9-]+' || true)
           DEPLOYMENT_ID=${DEPLOYMENT_ID:-$(echo "$OUTPUT" | grep -oP 'id: \K[a-f0-9-]+' || true)}
           if [ -z "$DEPLOYMENT_ID" ]; then
-            DEPLOYMENT_ID="$(date +%s)-${{ inputs.service }}-${{ inputs.environment }}"
+            DEPLOYMENT_ID="$(date +%s)-${{ inputs.service }}"
           fi
           echo "deployment-id=$DEPLOYMENT_ID" >> $GITHUB_OUTPUT
           
@@ -77,6 +71,6 @@ jobs:
             echo "deployment-status=success" >> $GITHUB_OUTPUT
           else
             echo "deployment-status=failure" >> $GITHUB_OUTPUT
-            echo "::error::Deployment failed for ${{ inputs.service }} (${{ inputs.environment }})"
+            echo "::error::Deployment failed for ${{ inputs.service }}"
             exit 1
           fi

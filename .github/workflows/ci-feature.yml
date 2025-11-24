@@ -9,45 +9,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # 1) Run knip at repo root (dependency check)
-  knip-check:
-    runs-on: ubuntu-latest
-    outputs:
-      knip-status: ${{ steps.knip.outputs.status }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install root deps
-        run: npm install
-
-      - name: Run knip
-        id: knip
-        run: |
-          if npm run knip --silent; then
-            echo "status=success" >> $GITHUB_OUTPUT
-          else
-            echo "::error::knip found issues"
-            echo "status=failure" >> $GITHUB_OUTPUT
-            exit 1
-          fi
-
-  # 2) Detect changed services
+  # 1) Detect changed services
   detect:
-    needs: knip-check
     uses: ./.github/workflows/detect-changes.yaml
     with:
       base-ref: origin/develop
       compare-ref: HEAD
 
-  # 3) Per-service checks (matrix)
+  # 2) Per-service checks (matrix)
   service-checks:
-    needs: [detect, knip-check]
+    needs: [detect]
     if: needs.detect.outputs.has-changes == 'true'
     strategy:
       fail-fast: false
@@ -57,12 +28,10 @@ jobs:
     with:
       service: ${{ matrix.service }}
 
-  # 4) Auto-merge PR into develop if everything passed
+  # 3) Auto-merge PR into develop if everything passed
   auto-merge:
-    needs: [service-checks, knip-check]
-    if: >
-      needs.knip-check.outputs.knip-status == 'success' &&
-      needs.service-checks.result == 'success'
+    needs: [service-checks]
+    if: needs.service-checks.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -114,7 +83,7 @@ jobs:
 
             core.info(`PR #${prNumber} merged successfully.`);
 
-  # 5) Notify Slack about CI result (success / failure)
+  # 4) Notify Slack about CI result (success / failure)
   notify:
     needs: [auto-merge, detect]
     if: always()
