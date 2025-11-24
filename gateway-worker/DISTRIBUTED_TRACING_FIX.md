@@ -1,16 +1,20 @@
 # Distributed Tracing Fix - Nested Traces
 
 ## Problem
+
 Traces are appearing separately instead of nested:
+
 - Gateway trace: `GET /api/products` (2 spans)
 - Product service trace: `GET /products` (2 spans) - **Separate trace ID**
 
 ## Root Cause
+
 Trace context is not being propagated from Gateway → Product Service, causing each service to create a new trace instead of continuing the existing one.
 
 ## Solution Implemented
 
 ### 1. Manual Trace Context Propagation (`service-caller.js`)
+
 Added manual trace context injection for service bindings:
 
 ```javascript
@@ -19,24 +23,28 @@ import { trace, context, propagation } from '@opentelemetry/api';
 // Get active span and inject trace context
 const activeSpan = trace.getActiveSpan();
 if (activeSpan) {
-  propagation.inject(context.active(), reqHeaders, {
-    set: (carrier, key, value) => {
-      carrier[key] = value;
-    },
-  });
+	propagation.inject(context.active(), reqHeaders, {
+		set: (carrier, key, value) => {
+			carrier[key] = value;
+		},
+	});
 }
 ```
 
 **Why?** Service bindings (`serviceBinding.fetch()`) may not be automatically instrumented by `@microlabs/otel-cf-workers`, so we manually inject the `traceparent` header.
 
 ### 2. Automatic Propagation for URL-based Calls
+
 When using `fetch()` with URLs, `@microlabs/otel-cf-workers` automatically:
+
 - Creates a child span
 - Injects `traceparent` header
 - Links spans in the same trace
 
 ### 3. Product Service Extraction
+
 The product service (`@microlabs/otel-cf-workers`) automatically:
+
 - Extracts `traceparent` header from incoming requests
 - Creates a child span linked to the parent trace
 - Continues the trace context
@@ -61,12 +69,14 @@ Trace ID: abc123... (single trace for entire flow)
 ### 1. Check Logs
 
 **Gateway logs should show:**
+
 ```
 [GATEWAY] Span Context: { traceId: 'abc123...', spanId: 'def456...' }
 [GATEWAY] Propagating trace context to PRODUCTS_SERVICE: { traceId: 'abc123...', spanId: 'def456...' }
 ```
 
 **Product Service logs should show:**
+
 ```
 [PRODUCT] Trace Context Headers: { traceparent: '00-abc123...', tracestate: 'none' }
 [PRODUCT] Span Context: { traceId: 'abc123...', spanId: 'ghi789...', isRemote: true }
@@ -121,12 +131,14 @@ After fix: Single trace with 5+ spans (gateway + product + handler + DB)
 ## Best Practices
 
 ### ✅ DO:
+
 - Use the same `HONEYCOMB_DATASET` for all services
 - Ensure all services use `@microlabs/otel-cf-workers`
 - Check logs to verify trace context propagation
 - Use service bindings when possible (better performance)
 
 ### ❌ DON'T:
+
 - Use different datasets per service
 - Skip `compatibility_flags: ["nodejs_compat"]`
 - Mix manual and automatic instrumentation incorrectly
@@ -135,8 +147,8 @@ After fix: Single trace with 5+ spans (gateway + product + handler + DB)
 ## Next Steps
 
 Once this is working for Gateway → Product Service:
+
 1. Apply the same pattern to other services (Auth, Order, etc.)
 2. Add DB instrumentation to all services
 3. Add handler instrumentation for better visibility
 4. Monitor trace completeness in Honeycomb
-
