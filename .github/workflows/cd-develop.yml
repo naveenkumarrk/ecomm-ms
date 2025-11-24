@@ -90,7 +90,7 @@ jobs:
         env:
           STAGING_URL: ${{ env.STAGING_URL }}
         run: |
-          npm ci
+          npm install
           npm run test:integration || exit 1
 
   merge-to-main:

@@ -30,7 +30,7 @@ jobs:
 
       - name: Install dependencies (service)
         working-directory: ${{ inputs.service }}
-        run: npm ci
+        run: npm install
 
       - name: Run Prettier / Lint
         working-directory: ${{ inputs.service }}
