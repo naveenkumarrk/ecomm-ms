@@ -141,7 +141,6 @@ jobs:
           npx wrangler rollback --env staging || true
 
       - name: Send Slack Rollback Notification
-        if: secrets.SLACK_WEBHOOK_URL != ''
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
