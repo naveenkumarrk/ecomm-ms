@@ -34,5 +34,10 @@
       "tag": "v1",
       "new_sqlite_classes": ["CartDurableObject"]
     }
-  ]
+  ],
+  "env": {
+    "staging": {
+      "name": "cart-worker-staging"
+    }
+  }
 }

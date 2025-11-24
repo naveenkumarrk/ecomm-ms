@@ -90,5 +90,10 @@
       "binding": "ORDER_SERVICE",
       "service": "order-worker"
     }
-  ]
+  ],
+  "env": {
+    "staging": {
+      "name": "gateway-worker-staging"
+    }
+  }
 }

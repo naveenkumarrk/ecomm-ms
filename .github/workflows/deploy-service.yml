@@ -51,6 +51,23 @@ jobs:
         working-directory: ${{ inputs.service }}
         run: npm install
 
+      - name: Check wrangler.jsonc for environment
+        working-directory: ${{ inputs.service }}
+        if: inputs.wrangler-env != ''
+        run: |
+          if [ -f "wrangler.jsonc" ]; then
+            # Check if staging environment exists in wrangler.jsonc
+            if ! grep -q "\"${{ inputs.wrangler-env }}\"" wrangler.jsonc && ! grep -q "'${{ inputs.wrangler-env }}'" wrangler.jsonc; then
+              echo "::error::Environment '${{ inputs.wrangler-env }}' not found in wrangler.jsonc for ${{ inputs.service }}"
+              echo "::error::Please add the following to wrangler.jsonc:"
+              echo "::error::\"env\": { \"${{ inputs.wrangler-env }}\": { \"name\": \"${{ inputs.service }}-${{ inputs.wrangler-env }}\" } }"
+              exit 1
+            fi
+          else
+            echo "::error::wrangler.jsonc not found for ${{ inputs.service }}"
+            exit 1
+          fi
+
       - name: Run wrangler deploy
         id: deploy-step
         working-directory: ${{ inputs.service }}
@@ -69,6 +86,21 @@ jobs:
           EXIT_CODE=$?
           echo "$OUTPUT"
           
+          # Check for common errors and provide helpful messages
+          if echo "$OUTPUT" | grep -qi "No environment found"; then
+            echo "::error::Environment '${{ inputs.wrangler-env }}' not configured in wrangler.jsonc"
+            echo "::error::Add this to wrangler.jsonc: \"env\": { \"${{ inputs.wrangler-env }}\": { \"name\": \"${{ inputs.service }}-${{ inputs.wrangler-env }}\" } }"
+            echo "deployment-status=failure" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::error::Wrangler deployment failed with exit code $EXIT_CODE"
+            echo "::error::Check the output above for details"
+            echo "deployment-status=failure" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
           # Extract deployment ID
           DEPLOYMENT_ID=$(echo "$OUTPUT" | grep -oP 'Current Version ID: \K[a-f0-9-]+' || echo "$OUTPUT" | grep -oP 'Version ID: \K[a-f0-9-]+' || echo "$OUTPUT" | grep -oP 'deployment-id: \K[a-f0-9-]+' || true)
           if [ -z "$DEPLOYMENT_ID" ]; then
@@ -80,12 +112,9 @@ jobs:
           # Success if we see "Uploaded" or "Deployed" or a workers.dev URL
           if echo "$OUTPUT" | grep -qiE "(Uploaded|Deployed|Published|Successfully)" || echo "$OUTPUT" | grep -qE "https://.*\.workers\.dev"; then
             echo "deployment-status=success" >> $GITHUB_OUTPUT
-            # If there was a warning about missing env section but deployment succeeded, just log it
-            if echo "$OUTPUT" | grep -qi "No environment found" && [ $EXIT_CODE -ne 0 ]; then
-              echo "::warning::Deployment succeeded despite missing env section in wrangler.jsonc"
-            fi
+            echo "::notice::Successfully deployed ${{ inputs.service }} to ${{ inputs.wrangler-env || 'default' }}"
           else
             echo "deployment-status=failure" >> $GITHUB_OUTPUT
-            echo "::error::Deployment failed for ${{ inputs.service }}"
+            echo "::error::Deployment failed for ${{ inputs.service }} - no success indicators found"
             exit 1
           fi

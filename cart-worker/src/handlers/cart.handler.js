@@ -450,6 +450,19 @@ export async function checkoutStartHandler(req, cart, state, env) {
 		};
 	}
 
+	// Get returnUrl from request body (optional, fallback to env var)
+	let returnUrl = null;
+	try {
+		const requestBody = await req.json().catch(() => ({}));
+		returnUrl = requestBody.returnUrl || null;
+	} catch {
+		// Request body already consumed or empty, use env var
+	}
+	// Fallback to env var if not provided in request
+	if (!returnUrl && env.FRONTEND_URL) {
+		returnUrl = `${env.FRONTEND_URL}/checkout/success`;
+	}
+
 	// Fetch address and user info from gateway
 	const addresses = await fetchUserAddresses(env.GATEWAY_URL, authToken);
 	const address = addresses.find((a) => a.addressId === cart.addressId);
@@ -505,6 +518,7 @@ export async function checkoutStartHandler(req, cart, state, env) {
 			amount: cart.summary.total,
 			currency: env.DEFAULT_CURRENCY || DEFAULT_CURRENCY,
 			userId: userId,
+			returnUrl: returnUrl, // Pass returnUrl to payment service
 			metadata: {
 				cartId: cart.cartId,
 				coupon: cart.coupon,
