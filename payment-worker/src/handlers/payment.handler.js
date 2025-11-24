@@ -158,21 +158,58 @@ export async function capturePaymentHandler(req, env) {
 				const details = captureErr.details;
 				console.log('[PAYMENT.CAPTURE] Capture failed, checking if order already captured:', details);
 
+				// Check if error indicates payment was declined (not already captured)
+				const isPaymentDeclined =
+					details.details && Array.isArray(details.details) && details.details.some((d) => d.issue === 'INSTRUMENT_DECLINED');
+
 				// Check if error indicates order already captured
 				const isAlreadyCaptured =
-					details.name === 'UNPROCESSABLE_ENTITY' ||
 					details.error === 'ORDER_ALREADY_CAPTURED' ||
 					(details.details &&
 						Array.isArray(details.details) &&
 						details.details.some(
 							(d) =>
 								d.issue === 'ORDER_ALREADY_CAPTURED' ||
-								d.issue === 'INSTRUMENT_DECLINED' ||
 								d.description?.includes('already captured') ||
 								d.description?.includes('already completed'),
 						));
 
-				if (isAlreadyCaptured || captureErr.status === 422) {
+				// Handle payment declined first - this is a failure, not already captured
+				if (isPaymentDeclined) {
+					console.log('[PAYMENT.CAPTURE] Payment instrument declined, releasing inventory...');
+
+					// Release inventory reservation since payment failed
+					if (env.INVENTORY_SERVICE && env.INTERNAL_SECRET) {
+						try {
+							await internalCall(env.INVENTORY_SERVICE, '/inventory/release', 'POST', { reservationId }, env.INTERNAL_SECRET, userContext);
+							console.log('[PAYMENT.CAPTURE] Inventory released after payment decline');
+						} catch (releaseErr) {
+							console.error('[PAYMENT.CAPTURE] Failed to release inventory:', releaseErr);
+							// Continue even if release fails - log it
+						}
+					}
+
+					// Return user-friendly error for declined payment
+					const declineDetails = details.details?.find((d) => d.issue === 'INSTRUMENT_DECLINED');
+					return jsonError(
+						{
+							error: 'payment_declined',
+							message:
+								declineDetails?.description ||
+								'Your payment method was declined. Please try a different payment method or contact your bank.',
+							details: {
+								issue: 'INSTRUMENT_DECLINED',
+								description: declineDetails?.description,
+								paypalOrderId,
+								reservationId,
+							},
+						},
+						402, // Payment Required
+					);
+				}
+
+				// Check if order is already captured (not declined)
+				if (isAlreadyCaptured || (captureErr.status === 422 && !isPaymentDeclined)) {
 					// Order might already be captured, verify and get capture info
 					console.log('[PAYMENT.CAPTURE] Order appears to be already captured, verifying status...');
 					try {
@@ -250,13 +287,48 @@ export async function capturePaymentHandler(req, env) {
 						);
 					}
 				} else {
-					// Different error, return it
+					// Different error - check if it's a payment failure that should release inventory
+					const isPaymentFailure =
+						details.details &&
+						Array.isArray(details.details) &&
+						details.details.some(
+							(d) =>
+								d.issue === 'PAYER_ACTION_REQUIRED' ||
+								d.issue === 'PAYMENT_DENIED' ||
+								d.issue === 'INSTRUMENT_DECLINED' ||
+								d.description?.toLowerCase().includes('declined') ||
+								d.description?.toLowerCase().includes('denied'),
+						);
+
+					if (isPaymentFailure) {
+						console.log('[PAYMENT.CAPTURE] Payment failure detected, releasing inventory...');
+						// Release inventory reservation since payment failed
+						if (env.INVENTORY_SERVICE && env.INTERNAL_SECRET) {
+							try {
+								await internalCall(
+									env.INVENTORY_SERVICE,
+									'/inventory/release',
+									'POST',
+									{ reservationId },
+									env.INTERNAL_SECRET,
+									userContext,
+								);
+								console.log('[PAYMENT.CAPTURE] Inventory released after payment failure');
+							} catch (releaseErr) {
+								console.error('[PAYMENT.CAPTURE] Failed to release inventory:', releaseErr);
+							}
+						}
+					}
+
+					// Return error
 					console.error('[PAYMENT.CAPTURE] Capture failed with unexpected error:', captureErr);
+					const errorMessage =
+						details.details?.[0]?.description || details.message || 'Failed to capture PayPal payment. Please try again.';
 					return jsonError(
 						{
 							error: 'capture_failed',
 							details: captureErr.details,
-							message: captureErr.details?.message || captureErr.details?.details?.[0]?.description || 'Failed to capture PayPal payment',
+							message: errorMessage,
 						},
 						captureErr.status || 502,
 					);
