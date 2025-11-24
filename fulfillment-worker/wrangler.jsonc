@@ -40,5 +40,10 @@
 "EXPRESS_DISCOUNT_MIN" : "2500",
 "EXPRESS_DISCOUNT_PERCENT" : "20",
     "INTERNAL_SECRET": "internalsecret"
+  },
+  "env": {
+    "staging": {
+      "name": "fulfillment-worker-staging"
+    }
   }
 }

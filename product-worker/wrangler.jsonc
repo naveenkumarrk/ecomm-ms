@@ -36,5 +36,10 @@
     "HONEYCOMB_API_KEY": "hcaik_01k9vs9pp541hp4k5fy56qa0j651g67x2qzjq776115jx5z2rq42r4kda1",
     "HONEYCOMB_DATASET": "ecomm-msHCTrace",
     "OTEL_EXPORTER_URL": "https://api.honeycomb.io/v1/traces"
+  },
+  "env": {
+    "staging": {
+      "name": "product-worker-staging"
+    }
   }
 }

@@ -37,5 +37,10 @@
       "binding": "ORDER_SERVICE",
       "service": "order-worker"
     }
-  ]
+  ],
+  "env": {
+    "staging": {
+      "name": "payment-worker-staging"
+    }
+  }
 }
