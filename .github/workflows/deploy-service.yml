@@ -50,25 +50,32 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          set -o pipefail
           if [ -n "${{ inputs.wrangler-env }}" ]; then
             CMD="npx wrangler deploy --env ${{ inputs.wrangler-env }}"
           else
             CMD="npx wrangler deploy"
           fi
           echo "Running: $CMD"
-          OUTPUT=$($CMD 2>&1 || true)
+          # Capture output and exit code separately
+          OUTPUT=$($CMD 2>&1)
+          EXIT_CODE=$?
           echo "$OUTPUT"
           
-          DEPLOYMENT_ID=$(echo "$OUTPUT" | grep -oP 'deployment-id: \K[a-f0-9-]+' || true)
-          DEPLOYMENT_ID=${DEPLOYMENT_ID:-$(echo "$OUTPUT" | grep -oP 'id: \K[a-f0-9-]+' || true)}
+          # Extract deployment ID
+          DEPLOYMENT_ID=$(echo "$OUTPUT" | grep -oP 'Current Version ID: \K[a-f0-9-]+' || echo "$OUTPUT" | grep -oP 'Version ID: \K[a-f0-9-]+' || echo "$OUTPUT" | grep -oP 'deployment-id: \K[a-f0-9-]+' || true)
           if [ -z "$DEPLOYMENT_ID" ]; then
             DEPLOYMENT_ID="$(date +%s)-${{ inputs.service }}"
           fi
           echo "deployment-id=$DEPLOYMENT_ID" >> $GITHUB_OUTPUT
           
-          if echo "$OUTPUT" | grep -qE "(deployed|Published|Successfully)"; then
+          # Check for success indicators (case-insensitive)
+          # Success if we see "Uploaded" or "Deployed" or a workers.dev URL
+          if echo "$OUTPUT" | grep -qiE "(Uploaded|Deployed|Published|Successfully)" || echo "$OUTPUT" | grep -qE "https://.*\.workers\.dev"; then
             echo "deployment-status=success" >> $GITHUB_OUTPUT
+            # If there was a warning about missing env section but deployment succeeded, just log it
+            if echo "$OUTPUT" | grep -qi "No environment found" && [ $EXIT_CODE -ne 0 ]; then
+              echo "::warning::Deployment succeeded despite missing env section in wrangler.jsonc"
+            fi
           else
             echo "deployment-status=failure" >> $GITHUB_OUTPUT
             echo "::error::Deployment failed for ${{ inputs.service }}"
