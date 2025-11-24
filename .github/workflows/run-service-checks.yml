@@ -26,7 +26,16 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
+
+      - name: Cache npm dependencies
+        uses: actions/cache@v4
+        id: npm-cache
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ inputs.service }}-${{ hashFiles(format('{0}/package.json', inputs.service)) }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ inputs.service }}-
+            ${{ runner.os }}-node-
 
       - name: Install dependencies (service)
         working-directory: ${{ inputs.service }}
