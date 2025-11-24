@@ -16,6 +16,7 @@ export function recomputeCartSummary(cart) {
 		discount,
 		shipping,
 		total: Math.max(0, subtotal - discount + shipping),
+		userId: cart.userId || null, // Include userId in summary
 	};
 }
 
