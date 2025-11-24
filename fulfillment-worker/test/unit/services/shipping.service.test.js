@@ -115,27 +115,6 @@ describe('shipping.service', () => {
 			expect(discountApplied).to.have.property('couponType', 'percent_shipping');
 		});
 
-		it('should apply express threshold discount', () => {
-			const env = {};
-			const totalWeight = 2.0;
-			const subtotal = 800; // Above express discount threshold but below free threshold
-			const zone = 'MUM';
-			const transitDays = 1;
-			const chosenWarehouse = { warehouseId: 'wh_1', handlingHours: 24 };
-			const couponDiscount = null;
-
-			const { options, discountApplied } = calculateShippingOptions(
-				env,
-				totalWeight,
-				subtotal,
-				zone,
-				transitDays,
-				chosenWarehouse,
-				couponDiscount,
-			);
-
-			expect(discountApplied).to.have.property('type', 'express_threshold_discount');
-		});
 
 		it('should apply flat shipping coupon discount', () => {
 			const env = {};

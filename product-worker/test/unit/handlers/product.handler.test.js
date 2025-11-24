@@ -120,6 +120,38 @@ describe('product.handler', () => {
 			expect(data).to.be.an('array').that.is.empty;
 		});
 
+		it('should return empty array when rows is null', async () => {
+			const stmt = env.DB.prepare();
+			stmt.all.resolves(null);
+
+			const response = await productHandler.getProductsHandler(request, env);
+			const data = await response.json();
+
+			expect(response.status).to.equal(200);
+			expect(data).to.be.an('array').that.is.empty;
+		});
+
+		it('should return empty array when rows.results is null', async () => {
+			const stmt = env.DB.prepare();
+			stmt.all.resolves({ results: null });
+
+			const response = await productHandler.getProductsHandler(request, env);
+			const data = await response.json();
+
+			expect(response.status).to.equal(200);
+			expect(data).to.be.an('array').that.is.empty;
+		});
+
+		it('should handle errors in getProductsHandler catch block', async () => {
+			request.url = 'invalid-url';
+
+			const response = await productHandler.getProductsHandler(request, env);
+			const data = await response.json();
+
+			expect(response.status).to.equal(500);
+			expect(data).to.have.property('error', 'Internal server error');
+		});
+
 		it('should handle missing DB binding', async () => {
 			delete env.DB;
 
@@ -245,6 +277,50 @@ describe('product.handler', () => {
 			expect(response.status).to.equal(500);
 			expect(data).to.have.property('error', 'R2 bucket not configured');
 		});
+
+		it('should return 500 if R2_PUBLIC_URL not configured', async () => {
+			delete env.R2_PUBLIC_URL;
+			request.url = 'https://example.com/products/images/upload';
+			const ts = Date.now().toString();
+			const msg = `${ts}|POST|/products/images/upload|`;
+			const enc = new TextEncoder();
+			const key = await crypto.subtle.importKey('raw', enc.encode('admin-secret'), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+			const sig = await crypto.subtle.sign('HMAC', key, enc.encode(msg));
+			const signature = [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('');
+
+			request.headers.get.withArgs('x-timestamp').returns(ts);
+			request.headers.get.withArgs('x-signature').returns(signature);
+			request.headers.get.withArgs('content-type').returns('application/json');
+			request.clone = sinon.stub().returns(request);
+			request.text = sinon.stub().resolves('');
+
+			const response = await productHandler.uploadImageHandler(request, env);
+			const data = await response.json();
+
+			expect(response.status).to.equal(500);
+			expect(data).to.have.property('error', 'R2 public URL not configured');
+		});
+
+		it('should handle upload errors', async () => {
+			request.url = 'https://example.com/products/images/upload';
+			const ts = Date.now().toString();
+			const msg = `${ts}|POST|/products/images/upload|`;
+			const enc = new TextEncoder();
+			const key = await crypto.subtle.importKey('raw', enc.encode('admin-secret'), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+			const sig = await crypto.subtle.sign('HMAC', key, enc.encode(msg));
+			const signature = [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('');
+
+			request.headers.get.withArgs('x-timestamp').returns(ts);
+			request.headers.get.withArgs('x-signature').returns(signature);
+			request.headers.get.withArgs('content-type').returns('multipart/form-data');
+			request.formData = sinon.stub().rejects(new Error('Upload failed'));
+
+			const response = await productHandler.uploadImageHandler(request, env);
+			const data = await response.json();
+
+			expect(response.status).to.equal(500);
+			expect(data).to.have.property('error', 'Upload failed');
+		});
 	});
 
 	describe('createProductHandler', () => {
@@ -299,6 +375,39 @@ describe('product.handler', () => {
 			expect(response.status).to.equal(400);
 			expect(data).to.have.property('error', 'validation_error');
 		});
+
+		it('should create product with single image string', async () => {
+			request.json = sinon.stub().resolves({
+				title: 'Test Product',
+				description: 'Test',
+				images: 'https://example.com/image.jpg',
+			});
+
+			const stmt = env.DB.prepare();
+			stmt.run.resolves({ success: true });
+
+			const response = await productHandler.createProductHandler(request, env);
+			const data = await response.json();
+
+			expect(response.status).to.equal(201);
+			expect(data).to.have.property('productId');
+		});
+
+		it('should handle errors during product creation', async () => {
+			request.json = sinon.stub().resolves({
+				title: 'Test Product',
+				description: 'Test',
+			});
+
+			const stmt = env.DB.prepare();
+			stmt.run.rejects(new Error('Database error'));
+
+			const response = await productHandler.createProductHandler(request, env);
+			const data = await response.json();
+
+			expect(response.status).to.equal(500);
+			expect(data).to.have.property('error', 'Creation failed');
+		});
 	});
 
 	describe('updateProductHandler', () => {
@@ -348,7 +457,7 @@ describe('product.handler', () => {
 			request.json = sinon.stub().resolves({ title: 'Updated Title' });
 
 			const stmt = env.DB.prepare();
-			stmt.first.onSecondCall().resolves({ product_id: 'pro_123' });
+			stmt.first.resolves({ product_id: 'pro_123' }); // First call for getProductById
 			stmt.run.resolves({ success: true });
 
 			const response = await productHandler.updateProductHandler(request, env);
@@ -367,6 +476,241 @@ describe('product.handler', () => {
 
 			expect(response.status).to.equal(400);
 			expect(data).to.have.property('error', 'No fields to update');
+		});
+
+		it('should handle single image string in updateData.images', async () => {
+			request.json = sinon.stub().resolves({ images: 'https://example.com/image.jpg' });
+
+			const stmt = env.DB.prepare();
+			stmt.first.resolves({ product_id: 'pro_123' }); // First call for getProductById
+			stmt.run.resolves({ success: true });
+
+			const response = await productHandler.updateProductHandler(request, env);
+			const data = await response.json();
+
+			expect(response.status).to.equal(200);
+			expect(data).to.have.property('updated', true);
+		});
+
+		it('should handle validation errors in update', async () => {
+			request.json = sinon.stub().resolves({ title: '' }); // Invalid: title too short
+
+			const response = await productHandler.updateProductHandler(request, env);
+			const data = await response.json();
+
+			expect(response.status).to.equal(400);
+			expect(data).to.have.property('error', 'validation_error');
+		});
+
+		it('should update sku field', async () => {
+			request.json = sinon.stub().resolves({ sku: 'NEW-SKU-123' });
+
+			const stmt = env.DB.prepare();
+			stmt.first.resolves({ product_id: 'pro_123' }); // First call for getProductById
+			stmt.run.resolves({ success: true });
+
+			const response = await productHandler.updateProductHandler(request, env);
+			const data = await response.json();
+
+			expect(response.status).to.equal(200);
+			expect(data).to.have.property('updated', true);
+		});
+
+		it('should update description field', async () => {
+			request.json = sinon.stub().resolves({ description: 'New description' });
+
+			const stmt = env.DB.prepare();
+			stmt.first.resolves({ product_id: 'pro_123' }); // First call for getProductById
+			stmt.run.resolves({ success: true });
+
+			const response = await productHandler.updateProductHandler(request, env);
+			const data = await response.json();
+
+			expect(response.status).to.equal(200);
+			expect(data).to.have.property('updated', true);
+		});
+
+		it('should update category field', async () => {
+			request.json = sinon.stub().resolves({ category: 'New Category' });
+
+			const stmt = env.DB.prepare();
+			stmt.first.resolves({ product_id: 'pro_123' }); // First call for getProductById
+			stmt.run.resolves({ success: true });
+
+			const response = await productHandler.updateProductHandler(request, env);
+			const data = await response.json();
+
+			expect(response.status).to.equal(200);
+			expect(data).to.have.property('updated', true);
+		});
+
+		it('should update images when imageUrls provided', async () => {
+			request.json = sinon.stub().resolves({ images: ['https://example.com/img1.jpg', 'https://example.com/img2.jpg'] });
+
+			const stmt = env.DB.prepare();
+			stmt.first.resolves({ product_id: 'pro_123' }); // First call for getProductById
+			stmt.run.resolves({ success: true });
+
+			const response = await productHandler.updateProductHandler(request, env);
+			const data = await response.json();
+
+			expect(response.status).to.equal(200);
+			expect(data).to.have.property('updated', true);
+		});
+
+		it('should update metadata field', async () => {
+			request.json = sinon.stub().resolves({ metadata: { price: 200, weight: 1.5 } });
+
+			const stmt = env.DB.prepare();
+			stmt.first.resolves({ product_id: 'pro_123' }); // First call for getProductById
+			stmt.run.resolves({ success: true });
+
+			const response = await productHandler.updateProductHandler(request, env);
+			const data = await response.json();
+
+			expect(response.status).to.equal(200);
+			expect(data).to.have.property('updated', true);
+		});
+
+		it('should handle errors during update', async () => {
+			request.json = sinon.stub().resolves({ title: 'Updated Title' });
+
+			const stmt = env.DB.prepare();
+			stmt.first.resolves({ product_id: 'pro_123' }); // First call for getProductById
+			stmt.run.rejects(new Error('Database error'));
+
+			const response = await productHandler.updateProductHandler(request, env);
+			const data = await response.json();
+
+			expect(response.status).to.equal(500);
+			expect(data).to.have.property('error', 'Update failed');
+		});
+
+		it('should upload image files and update product', async () => {
+			// Setup admin auth
+			const ts = Date.now().toString();
+			const body = '';
+			const msg = `${ts}|PUT|/products/pro_123|${body}`;
+			const enc = new TextEncoder();
+			const key = await crypto.subtle.importKey('raw', enc.encode('admin-secret'), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+			const sig = await crypto.subtle.sign('HMAC', key, enc.encode(msg));
+			const signature = [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('');
+
+			request.headers.get.withArgs('x-timestamp').returns(ts);
+			request.headers.get.withArgs('x-signature').returns(signature);
+			request.headers.get.withArgs('content-type').returns('multipart/form-data');
+
+			const formData = new FormData();
+			formData.append('title', 'Updated Title');
+			const imageFile = new File([new Uint8Array(100)], 'test.jpg', { type: 'image/jpeg' });
+			formData.append('images', imageFile);
+
+			request.formData = sinon.stub().resolves(formData);
+
+			env.PRODUCT_IMAGES.put.resolves();
+
+			const stmt = env.DB.prepare();
+			stmt.first.resolves({ product_id: 'pro_123' }); // First call for getProductById
+			stmt.run.resolves({ success: true });
+
+			const response = await productHandler.updateProductHandler(request, env);
+			const data = await response.json();
+
+			expect(response.status).to.equal(200);
+			expect(data).to.have.property('updated', true);
+			expect(env.PRODUCT_IMAGES.put).to.have.been.calledOnce;
+		});
+
+		it('should update product with multipart form data using product field', async () => {
+			const ts = Date.now().toString();
+			const body = '';
+			const msg = `${ts}|PUT|/products/pro_123|${body}`;
+			const enc = new TextEncoder();
+			const key = await crypto.subtle.importKey('raw', enc.encode('admin-secret'), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+			const sig = await crypto.subtle.sign('HMAC', key, enc.encode(msg));
+			const signature = [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('');
+
+			request.headers.get.withArgs('x-timestamp').returns(ts);
+			request.headers.get.withArgs('x-signature').returns(signature);
+			request.headers.get.withArgs('content-type').returns('multipart/form-data');
+
+			const formData = new FormData();
+			formData.append('product', JSON.stringify({ title: 'Updated Title', description: 'Updated' }));
+
+			request.formData = sinon.stub().resolves(formData);
+
+			const stmt = env.DB.prepare();
+			stmt.first.resolves({ product_id: 'pro_123' }); // First call for getProductById
+			stmt.run.resolves({ success: true });
+
+			const response = await productHandler.updateProductHandler(request, env);
+			const data = await response.json();
+
+			expect(response.status).to.equal(200);
+			expect(data).to.have.property('updated', true);
+		});
+
+		it('should update product with multipart form data using individual fields', async () => {
+			const ts = Date.now().toString();
+			const body = '';
+			const msg = `${ts}|PUT|/products/pro_123|${body}`;
+			const enc = new TextEncoder();
+			const key = await crypto.subtle.importKey('raw', enc.encode('admin-secret'), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+			const sig = await crypto.subtle.sign('HMAC', key, enc.encode(msg));
+			const signature = [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('');
+
+			request.headers.get.withArgs('x-timestamp').returns(ts);
+			request.headers.get.withArgs('x-signature').returns(signature);
+			request.headers.get.withArgs('content-type').returns('multipart/form-data');
+
+			const formData = new FormData();
+			formData.append('sku', 'NEW-SKU');
+			formData.append('title', 'Updated Title');
+			formData.append('description', 'Updated Description');
+			formData.append('category', 'New Category');
+			formData.append('metadata', JSON.stringify({ price: 200 }));
+
+			request.formData = sinon.stub().resolves(formData);
+
+			const stmt = env.DB.prepare();
+			stmt.first.resolves({ product_id: 'pro_123' }); // First call for getProductById
+			stmt.run.resolves({ success: true });
+
+			const response = await productHandler.updateProductHandler(request, env);
+			const data = await response.json();
+
+			expect(response.status).to.equal(200);
+			expect(data).to.have.property('updated', true);
+		});
+
+		it('should update product with imageUrls in multipart', async () => {
+			const ts = Date.now().toString();
+			const body = '';
+			const msg = `${ts}|PUT|/products/pro_123|${body}`;
+			const enc = new TextEncoder();
+			const key = await crypto.subtle.importKey('raw', enc.encode('admin-secret'), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+			const sig = await crypto.subtle.sign('HMAC', key, enc.encode(msg));
+			const signature = [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('');
+
+			request.headers.get.withArgs('x-timestamp').returns(ts);
+			request.headers.get.withArgs('x-signature').returns(signature);
+			request.headers.get.withArgs('content-type').returns('multipart/form-data');
+
+			const formData = new FormData();
+			formData.append('title', 'Updated Title');
+			formData.append('imageUrls', JSON.stringify(['https://example.com/img1.jpg']));
+
+			request.formData = sinon.stub().resolves(formData);
+
+			const stmt = env.DB.prepare();
+			stmt.first.resolves({ product_id: 'pro_123' }); // First call for getProductById
+			stmt.run.resolves({ success: true });
+
+			const response = await productHandler.updateProductHandler(request, env);
+			const data = await response.json();
+
+			expect(response.status).to.equal(200);
+			expect(data).to.have.property('updated', true);
 		});
 	});
 });

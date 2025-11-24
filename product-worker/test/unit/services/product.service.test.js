@@ -240,22 +240,37 @@ describe('product.service', () => {
 				INTERNAL_SECRET: 'test-secret',
 			};
 
-			fetchStub.onFirstCall().resolves({
-				ok: true,
-				status: 200,
-				text: sinon.stub().resolves('{"stock": 50, "reserved": 5}'),
-			});
-			fetchStub.onSecondCall().resolves({
-				ok: true,
-				status: 200,
-				text: sinon.stub().resolves('{"stock": 100, "reserved": 10}'),
+			// Mock fetch to return different stock based on request body
+			fetchStub.callsFake(async (url, options) => {
+				const body = JSON.parse(options.body);
+				if (body.productId === 'pro_1') {
+					return {
+						ok: true,
+						status: 200,
+						text: sinon.stub().resolves('{"stock": 50, "reserved": 5}'),
+					};
+				} else if (body.productId === 'pro_2') {
+					return {
+						ok: true,
+						status: 200,
+						text: sinon.stub().resolves('{"stock": 100, "reserved": 10}'),
+					};
+				}
+				return {
+					ok: true,
+					status: 200,
+					text: sinon.stub().resolves('{"stock": 0, "reserved": 0}'),
+				};
 			});
 
 			const results = await enrichProductsWithStock(mockEnv, rows);
 
 			expect(results).to.be.an('array').with.length(2);
-			expect(results[0]).to.have.property('stock', 50);
-			expect(results[1]).to.have.property('stock', 100);
+			// Match by productId since Promise.all preserves order
+			const pro1 = results.find((r) => r.productId === 'pro_1');
+			const pro2 = results.find((r) => r.productId === 'pro_2');
+			expect(pro1).to.have.property('stock', 50);
+			expect(pro2).to.have.property('stock', 100);
 			expect(fetchStub).to.have.been.calledTwice;
 		});
 	});
