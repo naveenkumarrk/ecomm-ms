@@ -3,6 +3,7 @@
   "name": "product-worker",
   "main": "src/index.js",
   "compatibility_date": "2025-11-18",
+  "compatibility_flags": ["nodejs_compat"],
 
   "observability": {
     "enabled": true
@@ -30,6 +31,10 @@
     "INTERNAL_SECRET": "internalsecret",
     "ADMIN_SECRET": "adminsecret",
     "INVENTORY_SERVICE_URL": "https://inventory-worker.111naveenkumarrk.workers.dev",
-    "R2_PUBLIC_URL": "https://pub-dce3c33e23b9434c80634889d98298b8.r2.dev"
+    "R2_PUBLIC_URL": "https://pub-dce3c33e23b9434c80634889d98298b8.r2.dev",
+    "SERVICE_NAME": "product-worker",
+    "HONEYCOMB_API_KEY": "hcaik_01k9vs9pp541hp4k5fy56qa0j651g67x2qzjq776115jx5z2rq42r4kda1",
+    "HONEYCOMB_DATASET": "ecomm-msHCTrace",
+    "OTEL_EXPORTER_URL": "https://api.honeycomb.io/v1/traces"
   }
 }

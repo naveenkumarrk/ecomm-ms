@@ -30,12 +30,19 @@ topRouter.all('*', async (req, env) => {
 		newHeaders.set('x-cart-id', cartId);
 
 		const forwardedUrl = new URL(req.url);
-		const forwarded = new Request(forwardedUrl.href, {
+		const requestInit = {
 			method: req.method,
 			headers: newHeaders,
-			body: req.body,
 			redirect: req.redirect,
-		});
+		};
+		
+		// Add body and duplex option if request has a body (Node.js requirement)
+		if (req.body) {
+			requestInit.body = req.body;
+			requestInit.duplex = 'half';
+		}
+		
+		const forwarded = new Request(forwardedUrl.href, requestInit);
 
 		const res = await stub.fetch(forwarded, { waitUntil: false });
 

@@ -3,8 +3,15 @@
  * Tests full shipping options and fulfillment flow
  */
 import { describe, it, beforeEach, afterEach } from 'mocha';
-import handler from '../../../src/index.js';
+import { fileURLToPath } from 'url';
+import { dirname, resolve } from 'path';
 import sinon from 'sinon';
+
+// Resolve import path relative to this file to avoid CI path resolution issues
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const handlerModule = await import('file://' + resolve(__dirname, '../../src/index.js'));
+const handler = handlerModule.default;
 
 describe('Fulfillment Worker Integration', () => {
 	let env, request;
