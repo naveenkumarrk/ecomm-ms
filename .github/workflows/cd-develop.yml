@@ -12,12 +12,12 @@ jobs:
   detect:
     uses: ./.github/workflows/detect-changes.yaml
     with:
-      base-ref: origin/develop
-      compare-ref: HEAD
+      base-ref: ${{ github.event.before }}
+      compare-ref: ${{ github.event.after }}
 
   deploy:
     needs: detect
-    if: needs.detect.outputs.has-changes == 'true'
+    if: needs.detect.outputs.has-changes == 'true' && needs.detect.outputs.services-json != '[]' && needs.detect.outputs.services-json != '' && needs.detect.outputs.services-json != 'null'
     strategy:
       fail-fast: false
       matrix:
@@ -32,7 +32,7 @@ jobs:
 
   integration-tests:
     needs: [deploy, detect]
-    if: needs.deploy.result == 'success'
+    if: needs.detect.outputs.has-changes == 'true' && needs.detect.outputs.services-json != '[]' && needs.detect.outputs.services-json != '' && needs.detect.outputs.services-json != 'null' && needs.deploy.result == 'success'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -94,8 +94,8 @@ jobs:
           npm run test:integration || exit 1
 
   merge-to-main:
-    needs: [integration-tests]
-    if: success()
+    needs: [integration-tests, detect]
+    if: needs.detect.outputs.has-changes == 'true' && needs.integration-tests.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -120,7 +120,7 @@ jobs:
 
   rollback:
     needs: [deploy, integration-tests, detect]
-    if: failure()
+    if: failure() && needs.detect.outputs.has-changes == 'true' && needs.detect.outputs.services-json != '[]' && needs.detect.outputs.services-json != '' && needs.detect.outputs.services-json != 'null'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

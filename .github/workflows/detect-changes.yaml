@@ -34,14 +34,67 @@ jobs:
       - name: Detect Changed Services
         id: out
         run: |
-          BASE=${{ inputs.base-ref || 'origin/develop' }}
-          COMPARE=${{ inputs.compare-ref || 'HEAD' }}
-          echo "Comparing $BASE ... $COMPARE"
-          git fetch --no-tags --depth=1 origin || true
-          CHANGED_FILES=$(git diff --name-only "$BASE...$COMPARE" || true)
-          if [ -z "$CHANGED_FILES" ]; then
-            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD || true)
+          BASE_INPUT="${{ inputs.base-ref }}"
+          COMPARE_INPUT="${{ inputs.compare-ref }}"
+          
+          # Fetch all branches and tags to ensure we have the latest
+          git fetch --no-tags --depth=100 origin || true
+          
+          # Handle base ref: if empty, all zeros (first push), or invalid, use fallback
+          if [ -z "$BASE_INPUT" ] || [ "$BASE_INPUT" = "0000000000000000000000000000000000000000" ]; then
+            echo "Base ref is empty or all zeros (first push), using fallback"
+            if git rev-parse --verify "HEAD~1" >/dev/null 2>&1; then
+              BASE_COMMIT="HEAD~1"
+              echo "Using HEAD~1 as base"
+            elif git rev-parse --verify "origin/develop" >/dev/null 2>&1; then
+              BASE_COMMIT="origin/develop"
+              echo "Using origin/develop as base"
+            else
+              echo "No previous commit found, comparing to empty tree"
+              BASE_COMMIT="$(git hash-object -t tree /dev/null)"
+            fi
+          elif git rev-parse --verify "$BASE_INPUT" >/dev/null 2>&1; then
+            BASE_COMMIT="$BASE_INPUT"
+            echo "Using provided base commit: $BASE_COMMIT"
+          else
+            echo "Base ref $BASE_INPUT not found, trying HEAD~1"
+            if git rev-parse --verify "HEAD~1" >/dev/null 2>&1; then
+              BASE_COMMIT="HEAD~1"
+              echo "Using HEAD~1 as base"
+            else
+              echo "No previous commit found, comparing to empty tree"
+              BASE_COMMIT="$(git hash-object -t tree /dev/null)"
+            fi
           fi
+          
+          # Handle compare ref: if empty or invalid, use HEAD
+          if [ -z "$COMPARE_INPUT" ]; then
+            COMPARE="HEAD"
+            echo "Compare ref is empty, using HEAD"
+          elif git rev-parse --verify "$COMPARE_INPUT" >/dev/null 2>&1; then
+            COMPARE="$COMPARE_INPUT"
+            echo "Using provided compare commit: $COMPARE"
+          else
+            echo "Compare ref $COMPARE_INPUT not found, using HEAD"
+            COMPARE="HEAD"
+          fi
+          
+          # Get changed files
+          echo "Comparing $BASE_COMMIT...$COMPARE"
+          CHANGED_FILES=$(git diff --name-only "$BASE_COMMIT" "$COMPARE" 2>/dev/null || git diff --name-only "$BASE_COMMIT...$COMPARE" 2>/dev/null || true)
+          
+          # Fallback: if no changes found and we're comparing the same commit, try HEAD~1 to HEAD
+          if [ -z "$CHANGED_FILES" ] || [ "$CHANGED_FILES" = "" ]; then
+            if [ "$BASE_COMMIT" = "$COMPARE" ]; then
+              echo "Base and compare are the same, trying HEAD~1...HEAD"
+              if git rev-parse --verify "HEAD~1" >/dev/null 2>&1; then
+                CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || true)
+          fi
+            fi
+          fi
+          
+          echo "Changed files:"
+          echo "$CHANGED_FILES" || echo "(none)"
           SERVICES_ARRAY=()
           HAS_CHANGES="false"
           for SERVICE in auth-worker cart-worker fulfillment-worker gateway-worker inventory-worker order-worker payment-worker product-worker; do
@@ -54,16 +107,24 @@ jobs:
             HAS_CHANGES="true"
             SERVICES_ARRAY=("auth-worker" "cart-worker" "fulfillment-worker" "gateway-worker" "inventory-worker" "order-worker" "payment-worker" "product-worker")
           fi
+          # Ensure we always have at least an empty array, not null
+          if [ ${#SERVICES_ARRAY[@]} -eq 0 ]; then
+            SERVICES_JSON='[]'
+            SERVICES_STRING=''
+          else
           SERVICES_JSON=$(printf '%s\n' "${SERVICES_ARRAY[@]}" | jq -R . | jq -s .)
           SERVICES_STRING=$(IFS=' '; echo "${SERVICES_ARRAY[*]}")
-          # Use delimiter to properly handle multi-line JSON
-          {
-            echo "services-json<<EOF"
-            echo "$SERVICES_JSON"
-            echo "EOF"
-          } >> $GITHUB_OUTPUT
+          fi
+          
+          # Output JSON as single line for GitHub Actions compatibility
+          echo "services-json=$SERVICES_JSON" >> $GITHUB_OUTPUT
           echo "services=$SERVICES_STRING" >> $GITHUB_OUTPUT
           echo "has-changes=$HAS_CHANGES" >> $GITHUB_OUTPUT
+          
+          echo "Debug: SERVICES_JSON=$SERVICES_JSON"
+          echo "Debug: HAS_CHANGES=$HAS_CHANGES"
+          echo "Debug: SERVICES_ARRAY length=${#SERVICES_ARRAY[@]}"
+          echo "Debug: SERVICES_STRING=$SERVICES_STRING"
           if [ "$HAS_CHANGES" = "true" ]; then
             echo "Detected services: $SERVICES_STRING"
           else
