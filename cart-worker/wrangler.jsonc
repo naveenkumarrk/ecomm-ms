@@ -11,6 +11,7 @@
     "INVENTORY_SERVICE_URL": "https://inventory-worker.111naveenkumarrk.workers.dev",
     "FULFILLMENT_SERVICE_URL": "https://fulfillment-worker.111naveenkumarrk.workers.dev",
     "PAYMENT_SERVICE_URL": "https://payment-worker.111naveenkumarrk.workers.dev",
+    "GATEWAY_URL" : "https://gateway-worker.111naveenkumarrk.workers.dev",
     "INTERNAL_SECRET": "internalsecret",
     "DEFAULT_CURRENCY": "USD"
   },

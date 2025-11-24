@@ -1,0 +1,112 @@
+name: CI Feature
+on:
+  pull_request:
+    branches: [develop]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: ci-feature-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # 1) Detect changed services
+  detect:
+    uses: ./.github/workflows/detect-changes.yaml
+    with:
+      base-ref: origin/develop
+      compare-ref: HEAD
+
+  # 2) Per-service checks (matrix)
+  service-checks:
+    needs: [detect]
+    if: needs.detect.outputs.has-changes == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.detect.outputs.services-json) }}
+    uses: ./.github/workflows/run-service-checks.yml
+    with:
+      service: ${{ matrix.service }}
+
+  # 3) Auto-merge PR into develop if everything passed
+  auto-merge:
+    needs: [service-checks]
+    if: needs.service-checks.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.PAT_TOKEN }}
+
+      - name: Auto-merge PR into develop using PAT
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PAT_TOKEN }}
+          script: |
+            const pr = context.payload.pull_request;
+            if (!pr) {
+              core.setFailed("No pull_request in event payload");
+              return;
+            }
+
+            const { owner, repo } = context.repo;
+            const prNumber = pr.number;
+
+            // Retrieve fresh PR data
+            const { data: prData } = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number: prNumber
+            });
+
+            if (prData.state !== "open") {
+              core.info(`PR #${prNumber} is not open. Skipping merge.`);
+              return;
+            }
+
+            if (prData.mergeable === false) {
+              core.info(`PR #${prNumber} is not mergeable. Skipping merge.`);
+              return;
+            }
+
+            // Merge using squash
+            await github.rest.pulls.merge({
+              owner,
+              repo,
+              pull_number: prNumber,
+              merge_method: "squash"
+            });
+
+            core.info(`PR #${prNumber} merged successfully.`);
+
+  # 4) Notify Slack about CI result (success / failure)
+  notify:
+    needs: [auto-merge, detect]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Slack Notification
+        if: always()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          PAYLOAD=$(cat <<EOF
+          {
+            "text": "<!here> CI Feature results for PR #${{ github.event.pull_request.number }}",
+            "blocks": [
+              { "type": "section", "text": { "type": "mrkdwn", "text": "*CI Feature Result*"} },
+              { "type": "section", "fields": [
+                  { "type": "mrkdwn", "text": "*Repo:*\n${{ github.server_url }}/${{ github.repository }}" },
+                  { "type": "mrkdwn", "text": "*PR:*\n#${{ github.event.pull_request.number }} - ${{ github.event.pull_request.title }}" },
+                  { "type": "mrkdwn", "text": "*Result:*\n${{ needs.auto-merge.result }}" },
+                  { "type": "mrkdwn", "text": "*Services:*\n${{ needs.detect.outputs.services }}" }
+              ] }
+            ]
+          }
+          EOF
+          )
+          curl -X POST -H 'Content-type: application/json' --data "$PAYLOAD" "$SLACK_WEBHOOK_URL" || true

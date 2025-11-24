@@ -1,0 +1,31 @@
+{
+	"name": "ecomm-ms",
+	"version": "1.0.0",
+	"private": true,
+	"description": "eCommerce Microservices Monorepo",
+	"workspaces": [
+		"auth-worker",
+		"cart-worker",
+		"fulfillment-worker",
+		"gateway-worker",
+		"inventory-worker",
+		"order-worker",
+		"payment-worker",
+		"product-worker"
+	],
+	"scripts": {
+		"format": "prettier --write \"**/*.{js,json,css,md}\"",
+		"format:check": "prettier --check \"**/*.{js,json,css,md}\"",
+		"knip": "knip",
+		"test:all": "npm run test:all --workspaces",
+		"test:coverage:all": "npm run test:coverage --workspaces"
+	},
+	"devDependencies": {
+		"knip": "^5.0.0",
+		"prettier": "^3.2.5"
+	},
+	"engines": {
+		"node": ">=20.0.0"
+	}
+}
+

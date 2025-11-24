@@ -1,0 +1,91 @@
+name: Deploy Service
+on:
+  workflow_call:
+    inputs:
+      service:
+        required: true
+        type: string
+      wrangler-env:
+        required: false
+        type: string
+    secrets:
+      CLOUDFLARE_API_TOKEN:
+        required: true
+      CLOUDFLARE_ACCOUNT_ID:
+        required: true
+    outputs:
+      deployment-id:
+        value: ${{ jobs.deploy.outputs.deployment-id }}
+      deployment-status:
+        value: ${{ jobs.deploy.outputs.deployment-status }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    outputs:
+      deployment-id: ${{ steps.deploy-step.outputs.deployment-id }}
+      deployment-status: ${{ steps.deploy-step.outputs.deployment-status }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Cache npm dependencies
+        uses: actions/cache@v4
+        id: npm-cache
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ inputs.service }}-${{ hashFiles(format('{0}/package.json', inputs.service)) }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ inputs.service }}-
+            ${{ runner.os }}-node-
+
+      - name: Install dependencies (service)
+        working-directory: ${{ inputs.service }}
+        run: npm install
+
+      - name: Run wrangler deploy
+        id: deploy-step
+        working-directory: ${{ inputs.service }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -n "${{ inputs.wrangler-env }}" ]; then
+            CMD="npx wrangler deploy --env ${{ inputs.wrangler-env }}"
+          else
+            CMD="npx wrangler deploy"
+          fi
+          echo "Running: $CMD"
+          # Capture output and exit code separately
+          OUTPUT=$($CMD 2>&1)
+          EXIT_CODE=$?
+          echo "$OUTPUT"
+          
+          # Extract deployment ID
+          DEPLOYMENT_ID=$(echo "$OUTPUT" | grep -oP 'Current Version ID: \K[a-f0-9-]+' || echo "$OUTPUT" | grep -oP 'Version ID: \K[a-f0-9-]+' || echo "$OUTPUT" | grep -oP 'deployment-id: \K[a-f0-9-]+' || true)
+          if [ -z "$DEPLOYMENT_ID" ]; then
+            DEPLOYMENT_ID="$(date +%s)-${{ inputs.service }}"
+          fi
+          echo "deployment-id=$DEPLOYMENT_ID" >> $GITHUB_OUTPUT
+          
+          # Check for success indicators (case-insensitive)
+          # Success if we see "Uploaded" or "Deployed" or a workers.dev URL
+          if echo "$OUTPUT" | grep -qiE "(Uploaded|Deployed|Published|Successfully)" || echo "$OUTPUT" | grep -qE "https://.*\.workers\.dev"; then
+            echo "deployment-status=success" >> $GITHUB_OUTPUT
+            # If there was a warning about missing env section but deployment succeeded, just log it
+            if echo "$OUTPUT" | grep -qi "No environment found" && [ $EXIT_CODE -ne 0 ]; then
+              echo "::warning::Deployment succeeded despite missing env section in wrangler.jsonc"
+            fi
+          else
+            echo "deployment-status=failure" >> $GITHUB_OUTPUT
+            echo "::error::Deployment failed for ${{ inputs.service }}"
+            exit 1
+          fi

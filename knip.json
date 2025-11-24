@@ -1,0 +1,53 @@
+{
+	"$schema": "https://unpkg.com/knip@5/schema.json",
+	"entry": [
+		"**/src/index.js",
+		"**/test/**/*.test.js",
+		"**/test/**/*.spec.js",
+		"**/test/integration/**/*.js"
+	],
+	"project": [
+		"**/*.{js,json}",
+		"!**/node_modules/**",
+		"!**/coverage/**",
+		"!**/.git/**"
+	],
+	"ignore": [
+		"**/node_modules/**",
+		"**/coverage/**",
+		"**/.git/**",
+		"**/dist/**",
+		"**/build/**"
+	],
+	"ignoreDependencies": [
+		"@cloudflare/vitest-pool-workers",
+		"wrangler"
+	],
+	"workspaces": {
+		"auth-worker": {
+			"entry": ["src/index.js", "test/**/*.js"]
+		},
+		"cart-worker": {
+			"entry": ["src/index.js", "test/**/*.js"]
+		},
+		"fulfillment-worker": {
+			"entry": ["src/index.js", "test/**/*.js"]
+		},
+		"gateway-worker": {
+			"entry": ["src/index.js", "test/**/*.js"]
+		},
+		"inventory-worker": {
+			"entry": ["src/index.js", "test/**/*.js"]
+		},
+		"order-worker": {
+			"entry": ["src/index.js", "test/**/*.js"]
+		},
+		"payment-worker": {
+			"entry": ["src/index.js", "test/**/*.js"]
+		},
+		"product-worker": {
+			"entry": ["src/index.js", "test/**/*.js"]
+		}
+	}
+}
+

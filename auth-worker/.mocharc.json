@@ -1,0 +1,7 @@
+{
+	"require": ["test/setup.js"],
+	"file": ["test/root-hooks.js"],
+	"recursive": true,
+	"timeout": 10000,
+	"exit": true
+}

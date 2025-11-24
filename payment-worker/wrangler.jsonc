@@ -3,6 +3,7 @@
   "name": "payment-worker",
   "main": "src/index.js",
   "compatibility_date": "2025-11-18",
+
   "observability": {
     "enabled": true
   },
@@ -11,7 +12,7 @@
     "PAYPAL_SECRET": "EPP9upKnhQrPj9NQW-1fsQmwfBcQslwy7UyX1O0cIhco33jChP1o04-NaLjP49NRg0LBgw_GP-M70geY",
     "PAYPAL_API": "https://api-m.sandbox.paypal.com",
     "INTERNAL_SECRET": "internalsecret",
-    "BASE_RETURN_URL": "http://localhost:8187",
+    "BASE_RETURN_URL": "http://localhost:5173/checkout/success",
     "BASE_CANCEL_URL": "http://localhost:8187"
   },
   "d1_databases": [

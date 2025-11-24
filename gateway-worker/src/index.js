@@ -1,210 +1,163 @@
-// gateway-worker.js
-import { Router } from "itty-router";
+/**
+ * Gateway Worker - Main entry point
+ * Uses @microlabs/otel-cf-workers for automatic instrumentation
+ * This will automatically trace:
+ * - HTTP requests/responses
+ * - Internal fetch calls to other services
+ * - Trace context propagation across services
+ */
+import { Router } from 'itty-router';
+import { instrument } from '@microlabs/otel-cf-workers';
+import { setupRoutes } from './routes/index.js';
+import { jsonRes } from './helpers/response.js';
+import { GATEWAY_TIMEOUT } from './config/constants.js';
+import { trace } from '@opentelemetry/api';
 
-/* -------------------------------------------------------
-   HELPER: Service Caller (Supports Bindings & URLs)
-   Fixes Error 1042
-------------------------------------------------------- */
-async function callService(envTarget, path, method = "GET", body = null, headers = {}) {
-  try {
-    const bodyText = body ? JSON.stringify(body) : null;
-    const reqHeaders = {
-      "Content-Type": "application/json",
-      "x-test-mode": "true",
-      ...headers
-    };
-
-    // CASE A: Service Binding (Preferred)
-    if (envTarget && typeof envTarget.fetch === 'function') {
-      const res = await envTarget.fetch(new Request(`https://internal${path}`, {
-        method, headers: reqHeaders, body: bodyText
-      }));
-      const txt = await res.text();
-      try { return { ok: res.ok, status: res.status, body: JSON.parse(txt) }; }
-      catch { return { ok: res.ok, status: res.status, body: txt }; }
-    }
-
-    // CASE B: URL String
-    if (typeof envTarget === 'string' && envTarget.startsWith('http')) {
-      const fullUrl = envTarget.replace(/\/$/, "") + path;
-      const res = await fetch(fullUrl, { method, headers: reqHeaders, body: bodyText });
-      const txt = await res.text();
-      try { return { ok: res.ok, status: res.status, body: JSON.parse(txt) }; }
-      catch { return { ok: res.ok, status: res.status, body: txt }; }
-    }
-
-    return { ok: false, status: 500, body: { error: "service_binding_missing" } };
-  } catch (err) {
-    console.error("Gateway Call Error:", err);
-    return { ok: false, status: 500, body: { error: "gateway_internal_error", details: err.message } };
-  }
-}
-
-/* -------------------------------------------------------
-   CART DO HELPERS
-------------------------------------------------------- */
-function getCartStub(env, cartId) {
-  try {
-    if (!env.CART_DO) throw new Error("CART_DO binding not found");
-    const id = env.CART_DO.idFromName(cartId);
-    return env.CART_DO.get(id);
-  } catch (e) {
-    console.error("DO Stub Error:", e);
-    return null;
-  }
-}
-
-async function fetchDO(stub, path, method = "GET", body = null, cartId) {
-  if (!stub) return { status: 500, body: { error: "cart_do_unavailable" } };
-  try {
-    // IMPORTANT: Pass x-cart-id header so DO knows who it is
-    const res = await stub.fetch(`https://cart${path}`, {
-      method,
-      headers: { 
-        "Content-Type": "application/json",
-        "x-cart-id": cartId 
-      },
-      body: body ? JSON.stringify(body) : null
-    });
-    const txt = await res.text();
-    try { return { status: res.status, body: JSON.parse(txt) }; } 
-    catch { return { status: res.status, body: txt }; }
-  } catch (e) {
-    return { status: 500, body: { error: "do_fetch_failed", message: e.message } };
-  }
-}
-
-/* -------------------------------------------------------
-   ROUTER
-------------------------------------------------------- */
 const router = Router();
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, X-Test-Mode"
+
+// Setup all routes
+setupRoutes(router);
+
+const handler = {
+	async fetch(request, env, ctx) {
+		const cfRay = request.headers.get('cf-ray') || 'No cf-ray header';
+
+		// Get active span (created by the instrument function)
+		const span = trace.getActiveSpan();
+
+		// Debug: Log span context to verify tracing is working
+		if (span) {
+			const spanContext = span.spanContext();
+			console.log('[GATEWAY] Span Context:', {
+				traceId: spanContext.traceId,
+				spanId: spanContext.spanId,
+				traceFlags: spanContext.traceFlags,
+			});
+
+			// Add custom attributes to the span
+			span.setAttribute('cf.ray', cfRay);
+			span.setAttribute('http.method', request.method);
+			span.setAttribute('http.url', request.url);
+			span.setAttribute('http.route', new URL(request.url).pathname);
+			span.setAttribute('service.name', env.SERVICE_NAME || 'ecomm-ms-gateway');
+
+			// Add request received event
+			span.addEvent('request_received', {
+				message: JSON.stringify({
+					request: request.url,
+					method: request.method,
+					cfRay: cfRay,
+					traceId: spanContext.traceId,
+				}),
+			});
+		} else {
+			console.warn('[GATEWAY] No active span found! Tracing may not be initialized correctly.');
+		}
+
+		console.log('[GATEWAY] Request:', request.method, new URL(request.url).pathname, 'CF-Ray:', cfRay);
+
+		try {
+			const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Gateway timeout')), GATEWAY_TIMEOUT));
+
+			const responsePromise = router.fetch(request, env, ctx);
+			const response = await Promise.race([responsePromise, timeoutPromise]);
+
+			// Add response attributes to span
+			if (span) {
+				span.setAttribute('http.status_code', response.status);
+				span.addEvent('response_sent', {
+					status: response.status,
+					statusText: response.statusText,
+				});
+
+				// Set span status based on response
+				if (response.status >= 500) {
+					span.setStatus({ code: 2, message: `HTTP ${response.status}` }); // ERROR
+				} else if (response.status >= 400) {
+					span.setStatus({ code: 1, message: `HTTP ${response.status}` }); // OK but client error
+				}
+			}
+
+			return response;
+		} catch (error) {
+			console.error('[GATEWAY] Worker error:', error);
+
+			// Record error in span
+			if (span) {
+				span.recordException(error);
+				span.setStatus({ code: 2, message: error.message }); // ERROR status
+				span.addEvent('error_occurred', {
+					error: error.message,
+					stack: error.stack,
+				});
+			}
+
+			return new Response(JSON.stringify({ error: 'Internal Server Error', message: error.message }), {
+				status: 500,
+				headers: { 'Content-Type': 'application/json' },
+			});
+		}
+	},
 };
 
-router.options("*", () => new Response("OK", { headers: corsHeaders }));
-const jsonRes = (data, status = 200) => 
-  new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json", ...corsHeaders } });
+// OpenTelemetry configuration
+const config = (env, _trigger) => {
+	console.log('[GATEWAY] Initializing OpenTelemetry config...');
+	console.log('[GATEWAY] HONEYCOMB_API_KEY present:', !!env.HONEYCOMB_API_KEY);
+	console.log('[GATEWAY] HONEYCOMB_DATASET:', env.HONEYCOMB_DATASET);
+	console.log('[GATEWAY] OTEL_EXPORTER_URL:', env.OTEL_EXPORTER_URL);
+	console.log('[GATEWAY] SERVICE_NAME:', env.SERVICE_NAME);
 
-/* --- PRODUCTS --- */
-router.get("/api/products", async (req, env) => {
-  const url = new URL(req.url);
-  const target = env.PRODUCTS_SERVICE || env.PRODUCTS_SERVICE_URL;
-  const res = await callService(target, `/products?limit=${url.searchParams.get("limit")||20}`);
-  return jsonRes(res.body, res.status);
-});
+	// Build headers with both API key and dataset
+	const headers = {
+		'x-honeycomb-team': env.HONEYCOMB_API_KEY || '',
+	};
 
-router.get("/api/products/:id", async (req, env) => {
-  const target = env.PRODUCTS_SERVICE || env.PRODUCTS_SERVICE_URL;
-  const res = await callService(target, `/products/${req.params.id}`);
-  return jsonRes(res.body, res.status);
-});
+	// Add dataset header if provided
+	if (env.HONEYCOMB_DATASET) {
+		headers['x-honeycomb-dataset'] = env.HONEYCOMB_DATASET;
+	}
 
-/* --- CART --- */
-router.post("/api/cart/init", async (req, env) => {
-  // 1. Generate ID in Gateway
-  const cartId = `cart_${crypto.randomUUID()}`;
-  const stub = getCartStub(env, cartId);
+	const configObj = {
+		exporter: {
+			url: env.OTEL_EXPORTER_URL || 'https://api.honeycomb.io/v1/traces',
+			headers: headers,
+		},
+		service: {
+			name: env.SERVICE_NAME || 'ecomm-ms-gateway',
+		},
+		// Enable fetch instrumentation - this will automatically trace all fetch calls
+		fetch: {
+			enabled: true,
+		},
+	};
 
-  // 2. Call DO (It will grab ID from header and persist)
-  const res = await fetchDO(stub, "/cart/init", "POST", {}, cartId);
-  
-  // 3. Ensure we return the generated cartId
-  return jsonRes({ ...res.body, cartId }, res.status);
-});
+	console.log(
+		'[GATEWAY] OpenTelemetry config:',
+		JSON.stringify(
+			{
+				exporter: {
+					url: configObj.exporter.url,
+					headers: {
+						'x-honeycomb-team': env.HONEYCOMB_API_KEY ? '***SET***' : '***MISSING***',
+						'x-honeycomb-dataset': configObj.exporter.headers['x-honeycomb-dataset'] || '***MISSING***',
+					},
+				},
+				service: configObj.service,
+				fetch: configObj.fetch,
+			},
+			null,
+			2,
+		),
+	);
 
-router.get("/api/cart/:cartId", async (req, env) => {
-  const { cartId } = req.params;
-  const stub = getCartStub(env, cartId);
-  const res = await fetchDO(stub, "/cart/summary", "GET", null, cartId);
-  return jsonRes(res.body, res.status);
-});
-
-router.post("/api/cart/:cartId/add", async (req, env) => {
-  const body = await req.json();
-  const { cartId } = req.params;
-  const stub = getCartStub(env, cartId);
-  const res = await fetchDO(stub, "/cart/add", "POST", body, cartId);
-  return jsonRes(res.body, res.status);
-});
-
-router.post("/api/cart/:cartId/update", async (req, env) => {
-  const body = await req.json();
-  const { cartId } = req.params;
-  const stub = getCartStub(env, cartId);
-  const res = await fetchDO(stub, "/cart/update", "POST", body, cartId);
-  return jsonRes(res.body, res.status);
-});
-
-router.post("/api/cart/:cartId/address", async (req, env) => {
-  const body = await req.json();
-  const { cartId } = req.params;
-  const stub = getCartStub(env, cartId);
-  const res = await fetchDO(stub, "/cart/address", "POST", body, cartId);
-  return jsonRes(res.body, res.status);
-});
-
-router.get("/api/cart/:cartId/shipping-options", async (req, env) => {
-  const { cartId } = req.params;
-  const stub = getCartStub(env, cartId);
-  const res = await fetchDO(stub, "/cart/shipping-options", "GET", null, cartId);
-  return jsonRes(res.body, res.status);
-});
-
-router.post("/api/cart/:cartId/shipping", async (req, env) => {
-  const body = await req.json();
-  const { cartId } = req.params;
-  const stub = getCartStub(env, cartId);
-  const res = await fetchDO(stub, "/cart/shipping", "POST", body, cartId);
-  return jsonRes(res.body, res.status);
-});
-
-
-router.post("/api/cart/:cartId/clear", async (req, env) => {
-  const { cartId } = req.params;
-  const stub = getCartStub(env, cartId);
-
-  const res = await fetchDO(stub, "/cart/clear", "POST", {}, cartId);
-
-  return jsonRes(res.body, res.status);
-});
-
-
-/* --- CHECKOUT --- */
-router.post("/api/checkout/start", async (req, env) => {
-  const body = await req.json();
-  const cartId = body.cartId || req.headers.get("x-cart-id");
-  
-  if (cartId && env.CART_DO) {
-      // If Checkout logic is inside DO, route there:
-      const stub = getCartStub(env, cartId);
-      const res = await fetchDO(stub, "/checkout/start", "POST", body, cartId);
-      return jsonRes(res.body, res.status);
-  } else {
-      // If Checkout is a separate worker service:
-      const target = env.CART_SERVICE || env.CART_SERVICE_URL; 
-      const res = await callService(target, "/checkout/start", "POST", body);
-      return jsonRes(res.body, res.status);
-  }
-});
-
-router.post("/api/checkout/capture", async (req, env) => {
-  const body = await req.json();
-  const target = env.PAYMENT_SERVICE || env.PAYMENT_SERVICE_URL;
-  const res = await callService(target, "/payment/paypal/capture", "POST", body);
-  return jsonRes(res.body, res.status);
-});
-
-router.get("/api/orders/:orderId", async (req, env) => {
-  const target = env.ORDER_SERVICE || env.ORDER_SERVICE_URL;
-  const res = await callService(target, `/orders/${req.params.orderId}`);
-  return jsonRes(res.body, res.status);
-});
-
-router.all("*", () => jsonRes({ error: "not_found" }, 404));
-
-export default {
-  fetch: (req, env) => router.fetch(req, env)
+	return configObj;
 };
+
+// Export the instrumented handler
+// This will automatically:
+// 1. Create spans for HTTP requests
+// 2. Instrument all fetch() calls (including service calls)
+// 3. Propagate trace context via W3C Trace Context headers
+// 4. Send traces to Honeycomb
+export default instrument(handler, config);

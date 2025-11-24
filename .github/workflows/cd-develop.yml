@@ -1,0 +1,157 @@
+name: CD Develop (Staging Deploy)
+on:
+  push:
+    branches: [develop]
+
+
+concurrency:
+  group: cd-develop-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    uses: ./.github/workflows/detect-changes.yaml
+    with:
+      base-ref: ${{ github.event.before }}
+      compare-ref: ${{ github.event.after }}
+
+  deploy:
+    needs: detect
+    if: needs.detect.outputs.has-changes == 'true' && needs.detect.outputs.services-json != '[]' && needs.detect.outputs.services-json != '' && needs.detect.outputs.services-json != 'null'
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.detect.outputs.services-json) }}
+    uses: ./.github/workflows/deploy-service.yml
+    with:
+      service: ${{ matrix.service }}
+      wrangler-env: staging
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+  integration-tests:
+    needs: [deploy, detect]
+    if: needs.detect.outputs.has-changes == 'true' && needs.detect.outputs.services-json != '[]' && needs.detect.outputs.services-json != '' && needs.detect.outputs.services-json != 'null' && needs.deploy.result == 'success'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.detect.outputs.services-json) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Set service-specific staging URL
+        id: set-url
+        run: |
+          # Construct staging URL based on service name
+          # Pattern: https://{service-name}.{account-subdomain}.workers.dev
+          # Or use STAGING_URLS_JSON secret with mapping: {"auth-worker": "https://...", ...}
+          
+          # Option 1: Use JSON mapping from secret (recommended)
+          # Format: {"auth-worker": "https://auth-worker.example.com", "cart-worker": "https://cart-worker.example.com", ...}
+          if [ -n "${{ secrets.STAGING_URLS_JSON }}" ]; then
+            SERVICE_URL=$(echo '${{ secrets.STAGING_URLS_JSON }}' | jq -r ".[\"${{ matrix.service }}\"] // empty")
+            if [ -z "$SERVICE_URL" ] || [ "$SERVICE_URL" = "null" ]; then
+              echo "::warning::No staging URL found for ${{ matrix.service }} in STAGING_URLS_JSON, falling back to pattern"
+              if [ -n "${{ secrets.STAGING_BASE_DOMAIN }}" ]; then
+                SERVICE_URL="https://${{ matrix.service }}-staging.${{ secrets.STAGING_BASE_DOMAIN }}"
+              else
+                SERVICE_URL="https://${{ matrix.service }}.${{ secrets.CLOUDFLARE_ACCOUNT_SUBDOMAIN }}.workers.dev"
+              fi
+            fi
+          # Option 2: Pattern-based construction with base domain
+          elif [ -n "${{ secrets.STAGING_BASE_DOMAIN }}" ]; then
+            # Pattern: https://{service-name}-staging.{base-domain}
+            SERVICE_URL="https://${{ matrix.service }}-staging.${{ secrets.STAGING_BASE_DOMAIN }}"
+          # Option 3: Cloudflare Workers default pattern
+          elif [ -n "${{ secrets.CLOUDFLARE_ACCOUNT_SUBDOMAIN }}" ]; then
+            # Pattern: https://{service-name}.{account-subdomain}.workers.dev
+            SERVICE_URL="https://${{ matrix.service }}.${{ secrets.CLOUDFLARE_ACCOUNT_SUBDOMAIN }}.workers.dev"
+          else
+            echo "::error::No staging URL configuration found. Set one of: STAGING_URLS_JSON, STAGING_BASE_DOMAIN, or CLOUDFLARE_ACCOUNT_SUBDOMAIN"
+            exit 1
+          fi
+          
+          echo "STAGING_URL=$SERVICE_URL" >> $GITHUB_ENV
+          echo "Using staging URL for ${{ matrix.service }}: $SERVICE_URL"
+
+      - name: Run integration tests for service
+        working-directory: ${{ matrix.service }}
+        env:
+          STAGING_URL: ${{ env.STAGING_URL }}
+        run: |
+          npm install
+          npm run test:integration || exit 1
+
+  merge-to-main:
+    needs: [integration-tests, detect]
+    if: needs.detect.outputs.has-changes == 'true' && needs.integration-tests.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.PAT_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Auto-merge develop → main using PAT
+        run: |
+          git fetch origin main
+          git checkout main
+          git merge origin/develop --no-ff -m "Auto merge develop → main (post-staging tests) [skip ci]"
+          git push https://x-access-token:${{ secrets.PAT_TOKEN }}@github.com/${{ github.repository }} main
+
+  rollback:
+    needs: [deploy, integration-tests, detect]
+    if: failure() && needs.detect.outputs.has-changes == 'true' && needs.detect.outputs.services-json != '[]' && needs.detect.outputs.services-json != '' && needs.detect.outputs.services-json != 'null'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.detect.outputs.services-json) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Rollback to last known good
+        working-directory: ${{ matrix.service }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          echo "Attempting rollback for ${{ matrix.service }}"
+          npx wrangler rollback --env staging || true
+
+      - name: Send Slack Rollback Notification
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          PAYLOAD=$(cat <<EOF
+          {
+            "text": "<!here> @ecomm-ms Staging deployment failed — rolled back",
+            "blocks":[
+              {"type":"section","text":{"type":"mrkdwn","text":"*Staging Rollback Performed*"}},
+              {"type":"section","fields":[{"type":"mrkdwn","text":"*Service:* ${{ matrix.service }}"}]}
+            ]
+          }
+          EOF
+          )
+          curl -X POST -H 'Content-type: application/json' --data "$PAYLOAD" "$SLACK_WEBHOOK_URL" || true

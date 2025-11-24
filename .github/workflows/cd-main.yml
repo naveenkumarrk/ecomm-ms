@@ -1,0 +1,88 @@
+name: CD Main (Production Deploy)
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: cd-main-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    uses: ./.github/workflows/detect-changes.yaml
+    with:
+      base-ref: origin/main
+      compare-ref: HEAD
+
+  deploy:
+    needs: detect
+    if: needs.detect.outputs.has-changes == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.detect.outputs.services-json) }}
+    uses: ./.github/workflows/deploy-service.yml
+    with:
+      service: ${{ matrix.service }}
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+  notify:
+    needs: [deploy, detect]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Slack Notification
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          PAYLOAD=$(cat <<EOF
+          {
+            "text": "<!here> @ecomm-ms Production deploy finished",
+            "blocks":[
+              {"type":"section","text":{"type":"mrkdwn","text":"*Production deploy finished*"}},
+              {"type":"section","fields":[{"type":"mrkdwn","text":"*Services:* ${{ needs.detect.outputs.services }}"}]}
+            ]
+          }
+          EOF
+          )
+          curl -X POST -H 'Content-type: application/json' --data "$PAYLOAD" "$SLACK_WEBHOOK_URL" || true
+
+  rollback:
+    needs: [deploy, detect]
+    if: failure()
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.detect.outputs.services-json) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Rollback service to last known good
+        working-directory: ${{ matrix.service }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          echo "Attempting rollback for ${{ matrix.service }}"
+          npx wrangler rollback || true
+
+      - name: Slack Rollback Notification
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          PAYLOAD=$(cat <<EOF
+          {
+            "text": "<!here> @ecomm-ms Production deployment failed — rolled back",
+            "blocks":[
+              {"type":"section","text":{"type":"mrkdwn","text":"*Production Rollback Performed*"}},
+              {"type":"section","fields":[{"type":"mrkdwn","text":"*Service:* ${{ matrix.service }}"}]}
+            ]
+          }
+          EOF
+          )
+          curl -X POST -H 'Content-type: application/json' --data "$PAYLOAD" "$SLACK_WEBHOOK_URL" || true
