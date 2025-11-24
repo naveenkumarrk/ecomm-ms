@@ -25,7 +25,15 @@ const handler = {
 		// Get active span (created by the instrument function)
 		const span = trace.getActiveSpan();
 		
+		// Debug: Log span context to verify tracing is working
 		if (span) {
+			const spanContext = span.spanContext();
+			console.log('[GATEWAY] Span Context:', {
+				traceId: spanContext.traceId,
+				spanId: spanContext.spanId,
+				traceFlags: spanContext.traceFlags,
+			});
+			
 			// Add custom attributes to the span
 			span.setAttribute('cf.ray', cfRay);
 			span.setAttribute('http.method', request.method);
@@ -39,9 +47,11 @@ const handler = {
 					request: request.url,
 					method: request.method,
 					cfRay: cfRay,
-					traceId: span.spanContext().traceId,
+					traceId: spanContext.traceId,
 				}),
 			});
+		} else {
+			console.warn('[GATEWAY] No active span found! Tracing may not be initialized correctly.');
 		}
 
 		console.log('[GATEWAY] Request:', request.method, new URL(request.url).pathname, 'CF-Ray:', cfRay);
@@ -94,6 +104,12 @@ const handler = {
 
 // OpenTelemetry configuration
 const config = (env, _trigger) => {
+	console.log('[GATEWAY] Initializing OpenTelemetry config...');
+	console.log('[GATEWAY] HONEYCOMB_API_KEY present:', !!env.HONEYCOMB_API_KEY);
+	console.log('[GATEWAY] HONEYCOMB_DATASET:', env.HONEYCOMB_DATASET);
+	console.log('[GATEWAY] OTEL_EXPORTER_URL:', env.OTEL_EXPORTER_URL);
+	console.log('[GATEWAY] SERVICE_NAME:', env.SERVICE_NAME);
+
 	// Build headers with both API key and dataset
 	const headers = {
 		'x-honeycomb-team': env.HONEYCOMB_API_KEY || '',
@@ -104,7 +120,7 @@ const config = (env, _trigger) => {
 		headers['x-honeycomb-dataset'] = env.HONEYCOMB_DATASET;
 	}
 
-	return {
+	const configObj = {
 		exporter: {
 			url: env.OTEL_EXPORTER_URL || 'https://api.honeycomb.io/v1/traces',
 			headers: headers,
@@ -113,15 +129,24 @@ const config = (env, _trigger) => {
 			name: env.SERVICE_NAME || 'ecomm-ms-gateway',
 		},
 		// Enable fetch instrumentation - this will automatically trace all fetch calls
-		// including internal service calls, and propagate trace context
 		fetch: {
 			enabled: true,
-			// Propagate trace context to downstream services
-			propagateTraceContext: true,
 		},
-		// Optional: Enable other instrumentations
-		// You can add more instrumentations here as needed
 	};
+
+	console.log('[GATEWAY] OpenTelemetry config:', JSON.stringify({
+		exporter: { 
+			url: configObj.exporter.url, 
+			headers: { 
+				'x-honeycomb-team': env.HONEYCOMB_API_KEY ? '***SET***' : '***MISSING***',
+				'x-honeycomb-dataset': configObj.exporter.headers['x-honeycomb-dataset'] || '***MISSING***'
+			} 
+		},
+		service: configObj.service,
+		fetch: configObj.fetch
+	}, null, 2));
+
+	return configObj;
 };
 
 // Export the instrumented handler

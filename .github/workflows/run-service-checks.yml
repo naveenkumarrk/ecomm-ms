@@ -35,7 +35,6 @@ jobs:
       - name: Run Prettier / Lint
         working-directory: ${{ inputs.service }}
         run: |
-          npm run format
           if npm run format:check --silent; then
             echo "lint=success"
           else
@@ -57,7 +56,8 @@ jobs:
             echo "::error::Coverage summary not found at ${PWD}/coverage/coverage-summary.json"
             exit 1
           fi
-          COVERAGE=$(node -e "const d=require('./coverage/coverage-summary.json'); console.log(d.total.lines.pct)")
+          # Extract coverage using jq (already installed, works with ES modules)
+          COVERAGE=$(jq -r '.total.lines.pct' coverage/coverage-summary.json)
           echo "Coverage for ${{ inputs.service }}: $COVERAGE%"
           # integer comparison
           python3 - <<PY
