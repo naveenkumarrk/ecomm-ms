@@ -1,9 +1,11 @@
 /**
  * Service caller - Handles both service bindings and URLs
  * Ensures trace context propagation for distributed tracing
+ * Creates child spans for each service call to build proper span tree
  */
 import { DEFAULT_TIMEOUT } from '../config/constants.js';
 import { trace, context, propagation } from '@opentelemetry/api';
+import { withServiceSpan } from '../middleware/tracing.middleware.js';
 
 export async function callService(
 	serviceName,
@@ -51,28 +53,10 @@ export async function callService(
 				});
 			}
 
-		// Get active span to propagate trace context
-		const activeSpan = trace.getActiveSpan();
-		if (activeSpan) {
-			const spanContext = activeSpan.spanContext();
-			console.log(`[GATEWAY] Propagating trace context to ${serviceName}:`, {
-				traceId: spanContext.traceId,
-				spanId: spanContext.spanId,
-			});
-
-			// Manually inject trace context into headers for service bindings
-			// (fetch() calls are automatically instrumented, but service bindings need manual propagation)
-			propagation.inject(context.active(), reqHeaders, {
-				set: (carrier, key, value) => {
-					carrier[key] = value;
-				},
-			});
-		}
-
-		// Determine target - try service binding first, then URL
-		let fetchPromise;
-		const serviceBinding = env[serviceName];
-		const serviceUrl = env[`${serviceName}_URL`];
+			// Determine target - try service binding first, then URL
+			let fetchPromise;
+			const serviceBinding = env[serviceName];
+			const serviceUrl = env[`${serviceName}_URL`];
 
 			// Try Service Binding first
 			if (serviceBinding && typeof serviceBinding.fetch === 'function') {
@@ -112,19 +96,20 @@ export async function callService(
 			const timeoutPromise = new Promise((_, reject) =>
 				setTimeout(() => reject(new Error(`Service call timeout after ${timeout}ms`)), timeout),
 			);
-		}
-		// Fallback to URL - fetch() is automatically instrumented by @microlabs/otel-cf-workers
-		else if (serviceUrl && serviceUrl.startsWith('http')) {
-			console.log(`[GATEWAY] Using URL for ${serviceName}: ${serviceUrl}`);
-			const fullUrl = serviceUrl.replace(/\/$/, '') + path;
-			// Use the instrumented fetch from the active context
-			fetchPromise = fetch(fullUrl, {
-				method,
-				headers: reqHeaders,
-				body: bodyText,
-			});
-		} else {
-			console.error(`[GATEWAY] No valid target for ${serviceName}`);
+
+			const res = await Promise.race([fetchPromise, timeoutPromise]);
+
+			console.log(`[GATEWAY] ${serviceName} responded with status: ${res.status}`);
+
+			const txt = await res.text();
+
+			try {
+				return { ok: res.ok, status: res.status, body: JSON.parse(txt) };
+			} catch {
+				return { ok: res.ok, status: res.status, body: txt };
+			}
+		} catch (err) {
+			console.error(`[GATEWAY] ${serviceName} Error:`, err.message);
 			return {
 				ok: false,
 				status: 504,
