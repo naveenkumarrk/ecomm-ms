@@ -43,7 +43,14 @@ export async function getProductsHandler(req, env) {
 				return jsonResponse({ error: 'Database not available' }, 500);
 			}
 
-			const url = new URL(req.url);
+			let url;
+			try {
+				url = new URL(req.url);
+			} catch (error) {
+				console.error('Invalid URL:', error);
+				return jsonResponse({ error: 'Internal server error', details: error.message }, 500);
+			}
+
 			const limit = Number(url.searchParams.get('limit') || DEFAULT_PRODUCT_LIMIT);
 			const offset = Number(url.searchParams.get('offset') || DEFAULT_PRODUCT_OFFSET);
 
@@ -85,7 +92,13 @@ export async function getProductByIdHandler(req, env) {
 	return await instrumentOperation(
 		'handler.getProductById',
 		async () => {
-			const row = await getProductById(env, id);
+			let row;
+			try {
+				row = await getProductById(env, id);
+			} catch (error) {
+				console.error('Database query error:', error);
+				return jsonResponse({ error: 'Internal server error', details: error.message }, 500);
+			}
 
 			if (!row) {
 				return jsonResponse({ error: 'Product not found' }, 404);
