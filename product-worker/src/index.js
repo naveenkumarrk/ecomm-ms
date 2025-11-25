@@ -7,6 +7,17 @@ import { setupProductRoutes } from './routes/product.routes.js';
 import { jsonResponse } from './helpers/response.js';
 import { trace } from '@opentelemetry/api';
 
+// Helper function to extract trace ID from traceparent header
+function extractTraceIdFromHeader(traceparent) {
+	if (!traceparent) return null;
+	// traceparent format: version-trace_id-parent_id-trace_flags
+	const parts = traceparent.split('-');
+	if (parts.length >= 2) {
+		return parts[1]; // trace_id is the second part
+	}
+	return null;
+}
+
 const router = Router();
 
 // Setup all routes
@@ -21,6 +32,8 @@ const handler = {
 			// Get active span and add custom attributes
 			const span = trace.getActiveSpan();
 			const cfRay = request.headers.get('cf-ray') || 'No cf-ray header';
+			const traceparent = request.headers.get('traceparent');
+			const traceIdFromHeader = extractTraceIdFromHeader(traceparent);
 
 			// Debug: Log span context to verify trace propagation from gateway
 			if (span) {
@@ -33,7 +46,6 @@ const handler = {
 				});
 
 				// Check for trace context headers (W3C Trace Context)
-				const traceparent = request.headers.get('traceparent');
 				const tracestate = request.headers.get('tracestate');
 				console.log('[PRODUCT] Trace Context Headers:', {
 					traceparent: traceparent ? traceparent.substring(0, 50) + '...' : 'none',
@@ -41,6 +53,9 @@ const handler = {
 				});
 
 				span.setAttribute('cf.ray', cfRay);
+				if (traceIdFromHeader) {
+					span.setAttribute('trace.id', traceIdFromHeader);
+				}
 				span.setAttribute('http.method', request.method);
 				span.setAttribute('http.url', request.url);
 				span.setAttribute('http.route', new URL(request.url).pathname);
@@ -52,6 +67,7 @@ const handler = {
 						method: request.method,
 						cfRay: cfRay,
 						traceId: spanContext.traceId,
+						traceIdFromHeader: traceIdFromHeader,
 					}),
 				});
 			} else {

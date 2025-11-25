@@ -7,6 +7,7 @@
 	"name": "auth-worker",
 	"main": "src/index.js",
 	"compatibility_date": "2025-11-21",
+	"compatibility_flags": ["nodejs_compat"],
 	"observability": {
 		"enabled": true
 	},
@@ -18,7 +19,7 @@
  "vars": {
 	"ACCESS_TOKEN_TTL" : 86400,
 	"ADMIN_SECRET": "adminsecret",
-	"JWT_SECRET": "lw+prJIH54ibX8krgSqd+XtrWonIjJecKw4cUtvzLdQ="
+	"JWT_SECRET": "lw+prJIH54ibX8krgSqd+XtrWonIjJecKw4cUtvzLdQ=",
 	 // 24h
  },
 	/**
