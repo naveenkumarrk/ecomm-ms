@@ -1,0 +1,46 @@
+#!/bin/sh
+
+echo ">>> Running code formatter..."
+npm run format || {
+  echo "❌ Formatting failed!"
+  exit 1
+}
+
+echo ">>> Running lint-staged..."
+npx lint-staged || {
+  echo "❌ lint-staged failed!"
+  exit 1
+}
+
+echo ">>> Checking for unused dependencies with knip..."
+npx knip --no-exit-code || {
+  echo "⚠️  Knip found issues (non-blocking)"
+}
+
+echo ">>> Running test suite with coverage..."
+npm run test:coverage || {
+  echo "❌ Tests or coverage failed!"
+  exit 1
+}
+
+echo ">>> Checking coverage threshold (80%) per service..."
+COVERAGE_FAILED=0
+for service in auth-worker cart-worker fulfillment-worker gateway-worker inventory-worker order-worker payment-worker product-worker; do
+  if [ -f "$service/coverage/coverage-summary.json" ]; then
+    COVERAGE=$(node -e "const cov = require('./$service/coverage/coverage-summary.json'); console.log(Math.round(cov.total.lines.pct))")
+    if [ "$COVERAGE" -lt 80 ]; then
+      echo "❌ $service coverage is ${COVERAGE}% (below 80% threshold)"
+      COVERAGE_FAILED=1
+    else
+      echo "✅ $service coverage: ${COVERAGE}%"
+    fi
+  fi
+done
+
+if [ $COVERAGE_FAILED -eq 1 ]; then
+  echo "❌ Some services have coverage below 80%!"
+  exit 1
+fi
+
+echo "✅ All checks passed!"
+

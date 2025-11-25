@@ -11,7 +11,9 @@ import sinon from 'sinon';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const handlerModule = await import('file://' + resolve(__dirname, '../../src/index.js'));
-const handler = handlerModule.default;
+// Use the raw handler export (without instrumentation) for Node.js testing
+// The default export uses @microlabs/otel-cf-workers which requires Cloudflare runtime
+const handler = handlerModule.handler || handlerModule.default;
 
 describe('Gateway Worker Integration', () => {
 	let env, request;

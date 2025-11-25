@@ -7,11 +7,23 @@
  * - Trace context propagation across services
  */
 import { Router } from 'itty-router';
-import { instrument } from '@microlabs/otel-cf-workers';
 import { setupRoutes } from './routes/index.js';
 import { jsonRes } from './helpers/response.js';
 import { GATEWAY_TIMEOUT } from './config/constants.js';
 import { trace } from '@opentelemetry/api';
+
+// Try to import instrument, but handle gracefully if it fails (e.g., in Node.js test environment)
+let instrument;
+let instrumentModule;
+try {
+	// Dynamic import to avoid loading Cloudflare-specific code in Node.js
+	instrumentModule = await import('@microlabs/otel-cf-workers');
+	instrument = instrumentModule.instrument;
+} catch (e) {
+	// Not in Cloudflare runtime or module not available
+	// This is expected in Node.js test environments
+	instrument = null;
+}
 
 const router = Router();
 
@@ -154,10 +166,15 @@ const config = (env, _trigger) => {
 	return configObj;
 };
 
-// Export the instrumented handler
+// Export the raw handler for testing (without instrumentation)
+// This allows tests to run in Node.js environments that don't support Cloudflare-specific APIs
+export { handler };
+
+// Export the instrumented handler (default export for production)
 // This will automatically:
 // 1. Create spans for HTTP requests
 // 2. Instrument all fetch() calls (including service calls)
 // 3. Propagate trace context via W3C Trace Context headers
 // 4. Send traces to Honeycomb
-export default instrument(handler, config);
+// If instrument is not available (e.g., in Node.js), just export the raw handler
+export default instrument ? instrument(handler, config) : handler;
