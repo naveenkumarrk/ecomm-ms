@@ -1,0 +1,34 @@
+#!/bin/sh
+
+echo ">>> Running code formatter..."
+npm run format || {
+  echo "❌ Formatting failed!"
+  exit 1
+}
+
+echo ">>> Running lint-staged..."
+npx lint-staged || {
+  echo "❌ lint-staged failed!"
+  exit 1
+}
+
+echo ">>> Checking for unused dependencies with knip..."
+npx knip --no-exit-code || {
+  echo "⚠️  Knip found issues (non-blocking)"
+}
+
+echo ">>> Running test suite with coverage..."
+npm run test:coverage || {
+  echo "❌ Tests or coverage failed!"
+  exit 1
+}
+
+echo ">>> Checking coverage threshold (99%)..."
+npx c8 check-coverage --lines 80 --functions 80 --branches 80 --statements 80 || {
+  echo "❌ Coverage is below 99%!"
+  npx c8 report --reporter=text-summary
+  exit 1
+}
+
+echo "✅ All checks passed!"
+

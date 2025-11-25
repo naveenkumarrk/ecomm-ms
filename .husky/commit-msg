@@ -1,0 +1,14 @@
+#!/bin/sh
+
+commit_message=$(cat "$1")
+
+regex="^firmly-[0-9]{3} : .+$"
+
+if ! echo "$commit_message" | grep -Eq "$regex"; then
+  echo "❌ Invalid commit message!"
+  echo "Use: firmly-001 : your message"
+  exit 1
+fi
+
+echo "✅ Commit message valid!"
+
