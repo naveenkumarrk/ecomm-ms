@@ -9,8 +9,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Check if PR is from feature/test branch
+  check-branch:
+    runs-on: ubuntu-latest
+    outputs:
+      is-feature-test: ${{ steps.check.outputs.is-feature-test }}
+    steps:
+      - name: Check if PR is from feature/test branch
+        id: check
+        run: |
+          PR_HEAD_REF="${{ github.head_ref }}"
+          if [ "$PR_HEAD_REF" = "feature/test" ]; then
+            echo "is-feature-test=true" >> $GITHUB_OUTPUT
+            echo "PR is from feature/test branch"
+          else
+            echo "is-feature-test=false" >> $GITHUB_OUTPUT
+            echo "PR is from $PR_HEAD_REF, skipping"
+          fi
+
   # 1) Detect changed services
   detect:
+    needs: [check-branch]
+    if: needs.check-branch.outputs.is-feature-test == 'true'
     uses: ./.github/workflows/detect-changes.yaml
     with:
       base-ref: origin/develop
@@ -30,8 +50,10 @@ jobs:
 
   # 3) Auto-merge PR into develop if everything passed
   auto-merge:
-    needs: [service-checks]
-    if: needs.service-checks.result == 'success'
+    needs: [service-checks, detect]
+    if: |
+      needs.detect.outputs.has-changes == 'true' && 
+      needs.service-checks.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -85,8 +107,8 @@ jobs:
 
   # 4) Notify Slack about CI result (success / failure)
   notify:
-    needs: [auto-merge, detect]
-    if: always()
+    needs: [auto-merge, detect, check-branch]
+    if: always() && needs.check-branch.outputs.is-feature-test == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Send Slack Notification
@@ -94,6 +116,7 @@ jobs:
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
+          SERVICES="${{ needs.detect.outputs.services || 'N/A' }}"
           PAYLOAD=$(cat <<EOF
           {
             "text": "<!here> CI Feature results for PR #${{ github.event.pull_request.number }}",
@@ -102,8 +125,8 @@ jobs:
               { "type": "section", "fields": [
                   { "type": "mrkdwn", "text": "*Repo:*\n${{ github.server_url }}/${{ github.repository }}" },
                   { "type": "mrkdwn", "text": "*PR:*\n#${{ github.event.pull_request.number }} - ${{ github.event.pull_request.title }}" },
-                  { "type": "mrkdwn", "text": "*Result:*\n${{ needs.auto-merge.result }}" },
-                  { "type": "mrkdwn", "text": "*Services:*\n${{ needs.detect.outputs.services }}" }
+                  { "type": "mrkdwn", "text": "*Result:*\n${{ needs.auto-merge.result || 'skipped' }}" },
+                  { "type": "mrkdwn", "text": "*Services:*\n$SERVICES" }
               ] }
             ]
           }
