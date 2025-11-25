@@ -1,0 +1,162 @@
+name: CI Develop (Lint, Unit Tests, Integration Tests)
+on:
+  push:
+    branches: [develop]
+
+concurrency:
+  group: ci-develop-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # 1) Detect changed services
+  detect:
+    uses: ./.github/workflows/detect-changes.yaml
+    with:
+      base-ref: ${{ github.event.before }}
+      compare-ref: ${{ github.event.after }}
+
+  # 2) Per-service lint and unit tests (matrix)
+  service-checks:
+    needs: [detect]
+    if: needs.detect.outputs.has-changes == 'true' && needs.detect.outputs.services-json != '[]' && needs.detect.outputs.services-json != '' && needs.detect.outputs.services-json != 'null'
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.detect.outputs.services-json) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Cache npm dependencies
+        uses: actions/cache@v4
+        id: npm-cache
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ matrix.service }}-${{ hashFiles(format('{0}/package.json', matrix.service)) }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ matrix.service }}-
+            ${{ runner.os }}-node-
+
+      - name: Install dependencies (service)
+        working-directory: ${{ matrix.service }}
+        run: npm install
+
+      - name: Run Prettier / Lint
+        working-directory: ${{ matrix.service }}
+        run: |
+          if npm run format:check --silent; then
+            echo "Lint check passed"
+          else
+            echo "::error::Format/lint check failed"
+            exit 1
+          fi
+
+      - name: Run unit tests
+        working-directory: ${{ matrix.service }}
+        run: |
+          npm run test:unit --silent
+
+  # 3) Per-service integration tests (matrix)
+  integration-tests:
+    needs: [detect, service-checks]
+    if: needs.detect.outputs.has-changes == 'true' && needs.detect.outputs.services-json != '[]' && needs.detect.outputs.services-json != '' && needs.detect.outputs.services-json != 'null' && needs.service-checks.result == 'success'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.detect.outputs.services-json) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Set service-specific staging URL
+        id: set-url
+        run: |
+          # Construct staging URL based on service name
+          # Pattern: https://{service-name}.{account-subdomain}.workers.dev
+          # Or use STAGING_URLS_JSON secret with mapping: {"auth-worker": "https://...", ...}
+          
+          # Option 1: Use JSON mapping from secret (recommended)
+          # Format: {"auth-worker": "https://auth-worker.example.com", "cart-worker": "https://cart-worker.example.com", ...}
+          if [ -n "${{ secrets.STAGING_URLS_JSON }}" ]; then
+            SERVICE_URL=$(echo '${{ secrets.STAGING_URLS_JSON }}' | jq -r ".[\"${{ matrix.service }}\"] // empty")
+            if [ -z "$SERVICE_URL" ] || [ "$SERVICE_URL" = "null" ]; then
+              echo "::warning::No staging URL found for ${{ matrix.service }} in STAGING_URLS_JSON, falling back to pattern"
+              if [ -n "${{ secrets.STAGING_BASE_DOMAIN }}" ]; then
+                SERVICE_URL="https://${{ matrix.service }}-staging.${{ secrets.STAGING_BASE_DOMAIN }}"
+              else
+                SERVICE_URL="https://${{ matrix.service }}.${{ secrets.CLOUDFLARE_ACCOUNT_SUBDOMAIN }}.workers.dev"
+              fi
+            fi
+          # Option 2: Pattern-based construction with base domain
+          elif [ -n "${{ secrets.STAGING_BASE_DOMAIN }}" ]; then
+            # Pattern: https://{service-name}-staging.{base-domain}
+            SERVICE_URL="https://${{ matrix.service }}-staging.${{ secrets.STAGING_BASE_DOMAIN }}"
+          # Option 3: Cloudflare Workers default pattern
+          elif [ -n "${{ secrets.CLOUDFLARE_ACCOUNT_SUBDOMAIN }}" ]; then
+            # Pattern: https://{service-name}.{account-subdomain}.workers.dev
+            SERVICE_URL="https://${{ matrix.service }}.${{ secrets.CLOUDFLARE_ACCOUNT_SUBDOMAIN }}.workers.dev"
+          else
+            echo "::error::No staging URL configuration found. Set one of: STAGING_URLS_JSON, STAGING_BASE_DOMAIN, or CLOUDFLARE_ACCOUNT_SUBDOMAIN"
+            exit 1
+          fi
+          
+          echo "STAGING_URL=$SERVICE_URL" >> $GITHUB_ENV
+          echo "Using staging URL for ${{ matrix.service }}: $SERVICE_URL"
+
+      - name: Run integration tests for service
+        working-directory: ${{ matrix.service }}
+        env:
+          STAGING_URL: ${{ env.STAGING_URL }}
+        run: |
+          npm install
+          npm run test:integration || exit 1
+
+  # 4) Notify Slack about CI result (success / failure)
+  notify:
+    needs: [integration-tests, service-checks, detect]
+    if: always() && needs.detect.outputs.has-changes == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Slack Notification
+        if: always()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          SERVICES="${{ needs.detect.outputs.services || 'N/A' }}"
+          INTEGRATION_RESULT="${{ needs.integration-tests.result || 'skipped' }}"
+          PAYLOAD=$(cat <<EOF
+          {
+            "text": "<!here> CI Develop results for commit ${{ github.sha }}",
+            "blocks": [
+              { "type": "section", "text": { "type": "mrkdwn", "text": "*CI Develop Result*"} },
+              { "type": "section", "fields": [
+                  { "type": "mrkdwn", "text": "*Repo:*\n${{ github.server_url }}/${{ github.repository }}" },
+                  { "type": "mrkdwn", "text": "*Commit:*\n${{ github.sha }}" },
+                  { "type": "mrkdwn", "text": "*Result:*\n$INTEGRATION_RESULT" },
+                  { "type": "mrkdwn", "text": "*Services:*\n$SERVICES" }
+              ] }
+            ]
+          }
+          EOF
+          )
+          curl -X POST -H 'Content-type: application/json' --data "$PAYLOAD" "$SLACK_WEBHOOK_URL" || true
+
