@@ -63,11 +63,20 @@ describe('Inventory Worker Integration', () => {
 
 			env.DB.prepare().bind.returnsThis();
 			env.DB.prepare().first.onFirstCall().resolves(mockStock); // Get stock
-			env.DB.prepare().first.onSecondCall().resolves(null); // Check lock
-			env.DB.prepare().run.onFirstCall().resolves({ success: true }); // Reserve stock
+			env.DB.prepare().run.onFirstCall().resolves({ success: true, meta: { changes: 1 } }); // Reserve stock
 			env.DB.prepare().run.onSecondCall().resolves({ success: true }); // Create reservation
 
-			env.INVENTORY_LOCK_KV.get.resolves(null); // No existing lock
+			// Mock lock acquisition: first call returns null (no lock), then after put, verify returns the owner
+			let lockCallCount = 0;
+			env.INVENTORY_LOCK_KV.get.callsFake(() => {
+				lockCallCount++;
+				if (lockCallCount === 1) {
+					return Promise.resolve(null); // No existing lock initially
+				}
+				// After put, verify should return the owner
+				return Promise.resolve('res-res_123');
+			});
+			env.INVENTORY_LOCK_KV.put.resolves(); // Allow lock to be set
 
 			const body = JSON.stringify({
 				reservationId: 'res_123',
@@ -91,7 +100,56 @@ describe('Inventory Worker Integration', () => {
 			const response = await handler.fetch(request, env);
 			const data = await response.json();
 
-			expect([200, 400]).to.include(response.status);
+			expect(response.status).to.equal(200);
+			expect(data.reservationId).to.equal('res_123');
+		});
+
+		it('should return 409 when product is locked by another reservation', async () => {
+			const mockStock = {
+				product_id: 'pro_1',
+				stock: 100,
+				reserved: 10,
+			};
+
+			// Mock active reservation that holds the lock
+			const mockActiveReservation = {
+				reservation_id: 'other_123',
+				status: 'active',
+				expires_at: Date.now() / 1000 + 3600, // Not expired
+			};
+
+			env.DB.prepare().bind.returnsThis();
+			env.DB.prepare().first.onFirstCall().resolves(mockStock); // Get stock
+			env.DB.prepare().first.onSecondCall().resolves(mockActiveReservation); // Check reservation status (active, not expired)
+
+			// Mock lock conflict: lock is held by another active reservation
+			// The lock service will retry, so we need to return the same value for all attempts
+			env.INVENTORY_LOCK_KV.get.resolves('res-other_123'); // Lock held by another reservation
+
+			const body = JSON.stringify({
+				reservationId: 'res_123',
+				cartId: 'cart_123',
+				userId: 'user_123',
+				items: [{ productId: 'pro_1', qty: 2 }],
+				ttl: 900,
+			});
+			const { timestamp, signature } = await generateSignature(env.INTERNAL_SECRET, 'POST', '/inventory/reserve', body);
+
+			request = new Request('https://example.com/inventory/reserve', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					'x-timestamp': timestamp,
+					'x-signature': signature,
+				},
+				body,
+			});
+
+			const response = await handler.fetch(request, env);
+			const data = await response.json();
+
+			expect(response.status).to.equal(409);
+			expect(data.error).to.equal('product_locked');
 		});
 	});
 

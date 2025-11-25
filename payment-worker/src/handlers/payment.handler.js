@@ -153,6 +153,18 @@ export async function capturePaymentHandler(req, env) {
 			capJson = captureResult.raw;
 			console.log('[PAYMENT.CAPTURE] PayPal capture successful, captureId:', captureId);
 		} catch (captureErr) {
+			// Handle 'not_captured' error - PayPal returned OK but no completed capture found
+			if (captureErr.error === 'not_captured') {
+				console.error('[PAYMENT.CAPTURE] Capture response did not contain completed capture:', captureErr.details);
+				return jsonError(
+					{
+						error: 'not_captured',
+						details: captureErr.details,
+						message: 'Payment was not captured successfully',
+					},
+					400,
+				);
+			}
 			// If capture fails, check if it's because order is already captured
 			if (captureErr.error === 'capture_failed' && captureErr.details) {
 				const details = captureErr.details;
