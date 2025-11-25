@@ -30,9 +30,22 @@ const router = Router();
 // Setup all routes
 setupRoutes(router);
 
+// Helper function to extract trace ID from traceparent header
+function extractTraceIdFromHeader(traceparent) {
+	if (!traceparent) return null;
+	// traceparent format: version-trace_id-parent_id-trace_flags
+	const parts = traceparent.split('-');
+	if (parts.length >= 2) {
+		return parts[1]; // trace_id is the second part
+	}
+	return null;
+}
+
 const handler = {
 	async fetch(request, env, ctx) {
 		const cfRay = request.headers.get('cf-ray') || 'No cf-ray header';
+		const traceparent = request.headers.get('traceparent');
+		const traceIdFromHeader = extractTraceIdFromHeader(traceparent);
 
 		// Get active span (created by the instrument function)
 		const span = trace.getActiveSpan();
@@ -48,6 +61,9 @@ const handler = {
 
 			// Add custom attributes to the span
 			span.setAttribute('cf.ray', cfRay);
+			if (traceIdFromHeader) {
+				span.setAttribute('trace.id', traceIdFromHeader);
+			}
 			span.setAttribute('http.method', request.method);
 			span.setAttribute('http.url', request.url);
 			span.setAttribute('http.route', new URL(request.url).pathname);
@@ -60,6 +76,7 @@ const handler = {
 					method: request.method,
 					cfRay: cfRay,
 					traceId: spanContext.traceId,
+					traceIdFromHeader: traceIdFromHeader,
 				}),
 			});
 		} else {

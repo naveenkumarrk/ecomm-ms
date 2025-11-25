@@ -10,7 +10,7 @@
 		"format": "prettier --write \"**/*.{js,json,css,md}\"",
 		"format:check": "prettier --check \"**/*.{js,json,css,md}\"",
 		"test:unit": "mocha \"test/unit/**/*.test.js\" --exclude \"test/integration/**/*.test.js\"",
-		"test:integration": "vitest run \"test/integration/**/*.test.js\"",
+		"test:integration": "mocha \"test/integration/**/*.test.js\" --timeout 20000 --exclude \"test/unit/**/*.test.js\" --require test/setup.js",
 		"test": "npm run test:unit && npm run test:integration",
 		"test:coverage": "npm run format:check && c8 --reporter=lcov --reporter=text --reporter=json-summary npm run test:unit",
 		"test:coverage:html": "npm run format:check && c8 --reporter=html --reporter=text npm run test:unit",

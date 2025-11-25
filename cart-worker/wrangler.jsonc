@@ -3,6 +3,7 @@
   "name": "cart-worker",
   "main": "src/index.js",
   "compatibility_date": "2025-11-18",
+  "compatibility_flags": ["nodejs_compat"],
   "observability": {
     "enabled": true
   },
@@ -13,7 +14,11 @@
     "PAYMENT_SERVICE_URL": "https://payment-worker.111naveenkumarrk.workers.dev",
     "GATEWAY_URL" : "https://gateway-worker.111naveenkumarrk.workers.dev",
     "INTERNAL_SECRET": "internalsecret",
-    "DEFAULT_CURRENCY": "USD"
+    "DEFAULT_CURRENCY": "USD",
+    "SERVICE_NAME": "cart-worker",
+    "HONEYCOMB_API_KEY": "hcaik_01k9vs9pp541hp4k5fy56qa0j651g67x2qzjq776115jx5z2rq42r4kda1",
+    "HONEYCOMB_DATASET": "ecomm-msHCTrace",
+    "OTEL_EXPORTER_URL": "https://api.honeycomb.io/v1/traces"
   },
   "kv_namespaces": [
     {
