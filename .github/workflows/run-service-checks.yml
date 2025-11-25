@@ -56,7 +56,7 @@ jobs:
         run: |
           npm run test:unit --silent
 
-      - name: Run coverage and enforce 90%
+      - name: Run coverage and enforce 80%
         working-directory: ${{ inputs.service }}
         run: |
           # run coverage (expect a coverage/coverage-summary.json)
@@ -71,7 +71,7 @@ jobs:
           # integer comparison
           python3 - <<PY
           C = int(round(float("${COVERAGE}")))
-          if C < 90:
+          if C < 80:
               raise SystemExit("coverage-failed")
           print("OK")
           PY

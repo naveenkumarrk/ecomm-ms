@@ -78,7 +78,7 @@ When opening a PR to `develop`:
 1. **Lint**: Prettier formatting check
 2. **Knip**: Dependency and unused code check
 3. **Unit Tests**: Run unit tests for changed services
-4. **Coverage**: Verify 90%+ code coverage
+4. **Coverage**: Verify 80%+ code coverage
 5. **Auto-merge**: If all checks pass, PR is auto-merged
 
 ### Staging Deployment (develop branch)
@@ -114,13 +114,12 @@ When code is merged to `main`:
 
 ## Coverage Requirements
 
-All services must maintain **90%+ code coverage** for PRs to be merged.
+All services must maintain **80%+ code coverage** for PRs to be merged.
 
 ## Contributing
 
 1. Create a feature branch from `develop`
 2. Make your changes
-3. Ensure all tests pass and coverage is 90%+
+3. Ensure all tests pass and coverage is 80%+
 4. Create a PR to `develop`
 5. CI will automatically check and merge if successful
-

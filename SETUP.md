@@ -16,6 +16,7 @@ npm install
 ```
 
 This installs:
+
 - `knip` for dependency checking
 - `prettier` for code formatting
 
@@ -78,9 +79,9 @@ Each service needs a `wrangler.jsonc` file with staging environment:
   "compatibility_date": "2024-01-01",
   "env": {
     "staging": {
-      "name": "service-name-staging"
-    }
-  }
+      "name": "service-name-staging",
+    },
+  },
 }
 ```
 
@@ -89,6 +90,7 @@ Each service needs a `wrangler.jsonc` file with staging environment:
 ### Test CI (PR to develop)
 
 1. Create a feature branch:
+
    ```bash
    git checkout -b feature/test-ci develop
    ```
@@ -96,6 +98,7 @@ Each service needs a `wrangler.jsonc` file with staging environment:
 2. Make a small change (e.g., add a comment)
 
 3. Commit and push:
+
    ```bash
    git add .
    git commit -m "test: CI pipeline"
@@ -108,7 +111,7 @@ Each service needs a `wrangler.jsonc` file with staging environment:
    - ✅ Lint check runs
    - ✅ Knip check runs
    - ✅ Unit tests run
-   - ✅ Coverage check (90%+)
+   - ✅ Coverage check (80%+)
    - ✅ PR status shows all checks
 
 ### Test Staging Deployment
@@ -157,7 +160,7 @@ Go to Settings → Branches
 ### Coverage Check Fails
 
 - Ensure `coverage/coverage-summary.json` exists
-- Check coverage is 90%+ using: `npm run test:coverage`
+- Check coverage is 80%+ using: `npm run test:coverage`
 
 ### Knip Check Fails
 
@@ -183,7 +186,7 @@ PR to develop
   ↓
 CI Checks (lint, knip, tests, coverage)
   ↓
-Auto-merge if 90%+ coverage
+Auto-merge if 80%+ coverage
   ↓
 Deploy to Staging
   ↓
@@ -204,4 +207,3 @@ Slack Notification
 - Configure monitoring and alerts
 - Set up deployment dashboards
 - Add performance testing
-

@@ -23,12 +23,24 @@ npm run test:coverage || {
   exit 1
 }
 
-echo ">>> Checking coverage threshold (99%)..."
-npx c8 check-coverage --lines 80 --functions 80 --branches 80 --statements 80 || {
-  echo "❌ Coverage is below 99%!"
-  npx c8 report --reporter=text-summary
+echo ">>> Checking coverage threshold (80%) per service..."
+COVERAGE_FAILED=0
+for service in auth-worker cart-worker fulfillment-worker gateway-worker inventory-worker order-worker payment-worker product-worker; do
+  if [ -f "$service/coverage/coverage-summary.json" ]; then
+    COVERAGE=$(node -e "const cov = require('./$service/coverage/coverage-summary.json'); console.log(Math.round(cov.total.lines.pct))")
+    if [ "$COVERAGE" -lt 80 ]; then
+      echo "❌ $service coverage is ${COVERAGE}% (below 80% threshold)"
+      COVERAGE_FAILED=1
+    else
+      echo "✅ $service coverage: ${COVERAGE}%"
+    fi
+  fi
+done
+
+if [ $COVERAGE_FAILED -eq 1 ]; then
+  echo "❌ Some services have coverage below 80%!"
   exit 1
-}
+fi
 
 echo "✅ All checks passed!"
 

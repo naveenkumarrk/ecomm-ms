@@ -20,7 +20,7 @@
     "test:all": "npm run test:all --workspaces",
     "test:coverage:all": "npm run test:coverage --workspaces",
     "test:coverage": "npm run test:coverage:all",
-    "prepare": "husky install"
+    "prepare": "node -e \"if (process.env.CI || process.env.GITHUB_ACTIONS) { process.exit(0); } try { require('child_process').execSync('husky install', { stdio: 'inherit' }); } catch(e) { process.exit(0); }\""
   },
   "devDependencies": {
     "husky": "^9.0.0",

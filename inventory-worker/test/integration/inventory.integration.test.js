@@ -63,7 +63,9 @@ describe('Inventory Worker Integration', () => {
 
 			env.DB.prepare().bind.returnsThis();
 			env.DB.prepare().first.onFirstCall().resolves(mockStock); // Get stock
-			env.DB.prepare().run.onFirstCall().resolves({ success: true, meta: { changes: 1 } }); // Reserve stock
+			env.DB.prepare()
+				.run.onFirstCall()
+				.resolves({ success: true, meta: { changes: 1 } }); // Reserve stock
 			env.DB.prepare().run.onSecondCall().resolves({ success: true }); // Create reservation
 
 			// Mock lock acquisition: first call returns null (no lock), then after put, verify returns the owner
